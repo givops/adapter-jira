@@ -45,11 +45,11 @@ class JiraRegistrationTest {
                             .hasSingleBean(ReleaseWriteAdapter.class).doesNotHaveBean(TicketWriteAdapter.class);
                     var definition = context.getBean(TicketProviderDefinition.class);
                     AdapterTestkit.verifyDefinition(definition);
-                    assertThat(definition.sdkApiVersion()).isEqualTo("0.1");
+                    assertThat(definition.sdkApiVersion()).isEqualTo("0.2");
                     assertThat(definition.capabilities()).containsExactly("ticketing.read", "ticketing.version-membership",
                             "ticketing.reports", "ticketing.release-write");
                     assertThat(definition.apiProfiles()).containsExactly("jira-cloud-rest-v3");
-                    assertThat(definition.adapterVersion()).isEqualTo("0.1.0-SNAPSHOT");
+                    assertThat(definition.adapterVersion()).isEqualTo("0.2.0-SNAPSHOT");
                     assertThat(captures).hasValue(0);
                 });
     }
