@@ -1,0 +1,30 @@
+"ticketing.jiraAdapter.ticketing.access.is.disabled": "Ticketing access is disabled."
+"ticketing.jiraConnection.jira.credentials.are.missing": "Jira credentials are missing."
+"ticketing.jiraConnection.the.jira.cloud.connection.configuration.is.invalid": "The Jira Cloud connection configuration is invalid."
+"ticketing.jiraPayload.jira.cloud.returned.an.invalid.or.out.of.scope": "Jira Cloud returned an invalid or out-of-scope response."
+"ticketing.jiraReleaseWriter.the.jira.operation.could.not.be.confirmed": "The Jira operation could not be confirmed."
+"ticketing.jiraReportAdapter.complete.provider.history.was.not.acquired": "Complete provider history was not acquired."
+"ticketing.jiraReportAdapter.no.matching.provider.issues.were.available.to.validate.the": "No matching provider issues were available to validate the mappings."
+"ticketing.jiraReportAdapter.some.provider.status.history.values.were.missing.or.redacted": "Some provider status history values were missing or redacted."
+"ticketing.jiraReportPayload.the.requested.provider.field.has.no.value": "The requested provider field has no value."
+"ticketing.jiraReportPayload.the.requested.provider.field.is.unavailable.or.incompatible.with": "The requested provider field is unavailable or incompatible with its configured extractor."
+"ticketing.jiraTransport.jira.cloud.did.not.expose.the.requested.resource": "Jira Cloud did not expose the requested resource."
+"ticketing.jiraTransport.jira.cloud.is.temporarily.unavailable": "Jira Cloud is temporarily unavailable."
+"ticketing.jiraTransport.jira.cloud.rate.limited.the.request": "Jira Cloud rate limited the request."
+"ticketing.jiraTransport.jira.cloud.rejected.the.api.request": "Jira Cloud rejected the API request."
+"ticketing.jiraTransport.jira.cloud.rejected.the.configured.credentials": "Jira Cloud rejected the configured credentials."
+"ticketing.jiraTransport.jira.cloud.returned.a.redirect": "Jira Cloud returned a redirect."
+"ticketing.jiraTransport.the.jira.cloud.read.exceeded.its.resource.budget": "The Jira Cloud read exceeded its resource budget."
+"ticketing.jiraTransport.the.jira.cloud.request.could.not.be.completed": "The Jira Cloud request could not be completed."
+"ticketing.jiraTransport.the.jira.cloud.request.timed.out": "The Jira Cloud request timed out."
+"ticketing.jiraTransport.the.jira.cloud.request.was.interrupted": "The Jira Cloud request was interrupted."
+"ticketing.jiraWriteTransport.the.jira.write.could.not.be.confirmed": "The Jira write could not be confirmed."
+jira:
+  credentials:
+    unavailable: Jira credentials are unavailable.
+    changed: The Jira credential context changed.
+  definition:
+    name: Jira Cloud
+    email: Atlassian account email
+    token: API token
+    cloud-id: Cloud ID (scoped tokens only)
