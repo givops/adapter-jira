@@ -79,6 +79,20 @@ class JiraRegistrationTest {
         assertThat(definition.runtimeCredentials(target)).isEmpty();
     }
 
+    @Test void catalogDestinationsKeepDefaultPortAndLengthBoundsSeparateFromFixtureTransport() {
+        var definition = new JiraProviderDefinition(new JiraProperties(Map.of()));
+        assertThat(definition.normalizeBaseUrl(URI.create("https://EXAMPLE.atlassian.net:443/")))
+                .hasToString("https://example.atlassian.net");
+        String maxHost = "a".repeat(63) + "." + "b".repeat(63) + "." + "c".repeat(63) + "." + "d".repeat(55);
+        assertThat(definition.normalizeBaseUrl(URI.create("https://" + maxHost)).toString()).hasSize(255);
+        assertThatThrownBy(() -> definition.normalizeBaseUrl(URI.create("https://" + maxHost + "e")))
+                .isInstanceOf(TicketException.class);
+        assertThatThrownBy(() -> definition.normalizeBaseUrl(URI.create("https://example.test:8443")))
+                .isInstanceOf(TicketException.class);
+        assertThat(JiraConnection.origin(URI.create("https://localhost:8443")))
+                .hasToString("https://localhost:8443");
+    }
+
     @Test void messagesAreOwnedByThisArtifactAndNeverContainProviderQueries() {
         assertThat(JiraMessages.patterns()).isNotEmpty().doesNotContainKey(
                 "ticketing.jiraAdapter.assignee.is.not.empty.and.statuscategory.done");

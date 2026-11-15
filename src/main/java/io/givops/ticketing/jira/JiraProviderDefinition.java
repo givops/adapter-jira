@@ -36,7 +36,12 @@ public final class JiraProviderDefinition implements TicketProviderDefinition {
     }
     @Override public String projectKeyPattern() { return JiraPayload.PROJECT_KEY.pattern(); }
     @Override public String externalIdPattern() { return JiraPayload.ID.pattern(); }
-    @Override public URI normalizeBaseUrl(URI value) { return JiraConnection.origin(value); }
+    @Override public URI normalizeBaseUrl(URI value) {
+        URI normalized = JiraConnection.origin(value);
+        if (value.getPort() != -1 && value.getPort() != 443 || normalized.toString().length() > 255)
+            throw JiraConnection.invalidConfiguration();
+        return normalized;
+    }
     @Override public void validateProject(String externalId, String projectKey) {
         if (externalId == null || projectKey == null || !JiraPayload.ID.matcher(externalId).matches()
                 || !JiraPayload.PROJECT_KEY.matcher(projectKey).matches()) throw JiraConnection.invalidConfiguration();
@@ -67,7 +72,7 @@ public final class JiraProviderDefinition implements TicketProviderDefinition {
         Map<String, String> pins;
         try {
             pins = Map.of("instanceKey", target.instanceKey(),
-                    "baseUrl", normalizeBaseUrl(URI.create(configured.expectedSiteOrigin())).toString());
+                    "baseUrl", JiraConnection.origin(URI.create(configured.expectedSiteOrigin())).toString());
         } catch (IllegalArgumentException | NullPointerException | io.givops.ticketing.model.TicketException exception) {
             // Invalid configuration remains identifiable, but cannot match a valid destination.
             pins = Map.of("baseUrl", "");
