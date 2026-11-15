@@ -13,9 +13,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** Installed capabilities are independent of a particular user's current authorization. */
 public final class JiraProviderDefinition implements TicketProviderDefinition {
+    private static final Pattern ISSUE_PATH = Pattern.compile("/browse/(" + IssueReference.KEY_PATTERN + ")");
     private final JiraProperties runtime;
 
     public JiraProviderDefinition(JiraProperties runtime) { this.runtime = runtime; }
@@ -36,6 +38,12 @@ public final class JiraProviderDefinition implements TicketProviderDefinition {
     }
     @Override public String projectKeyPattern() { return JiraPayload.PROJECT_KEY.pattern(); }
     @Override public String externalIdPattern() { return JiraPayload.ID.pattern(); }
+    /** Syntax only: the host enforces configured origin, context, ambiguity and resource budgets. */
+    @Override public Optional<IssueReference> issueReference(URI candidate) {
+        if (candidate == null || candidate.getRawPath() == null) return Optional.empty();
+        var match = ISSUE_PATH.matcher(candidate.getRawPath());
+        return match.matches() ? Optional.of(new IssueReference(match.group(1), "")) : Optional.empty();
+    }
     @Override public URI normalizeBaseUrl(URI value) {
         URI normalized = JiraConnection.origin(value);
         if (value.getPort() != -1 && value.getPort() != 443 || normalized.toString().length() > 255)

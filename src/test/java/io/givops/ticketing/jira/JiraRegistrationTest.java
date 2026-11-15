@@ -23,6 +23,8 @@ import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -91,6 +93,29 @@ class JiraRegistrationTest {
                 .isInstanceOf(TicketException.class);
         assertThat(JiraConnection.origin(URI.create("https://localhost:8443")))
                 .hasToString("https://localhost:8443");
+    }
+
+    @Test void recognizesJiraIssueSyntaxWhileLeavingOriginAndAuthorizationChecksToTheHost() {
+        var definition = new JiraProviderDefinition(new JiraProperties(Map.of()));
+        for (String candidate : new String[] {
+                "https://jira.example.test/browse/app_2-7?view=detail#comment",
+                "http://other.example.test/browse/app_2-7",
+                "https://user@other.example.test:8443/browse/app_2-7" }) {
+            var reference = definition.issueReference(URI.create(candidate)).orElseThrow();
+            assertThat(reference.issueKey()).isEqualTo("APP_2-7");
+            assertThat(reference.contextPath()).isEmpty();
+        }
+        assertThat(definition.issueReference(null)).isEmpty();
+        assertThat(definition.issueReference(URI.create("mailto:example@example.test"))).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "/issue/APP-1", "/context/browse/APP-1", "/browse/APP-1/",
+            "/browse/A-1", "/browse/APP-0", "/browse/APP-01", "/browse/APP-12345678901234567890",
+            "/%62rowse/APP-1", "/browse/APP%2D1", "/browse/APP-1/extra" })
+    void rejectsPathsOutsideTheExistingJiraReferenceGrammar(String path) {
+        var definition = new JiraProviderDefinition(new JiraProperties(Map.of()));
+        assertThat(definition.issueReference(URI.create("https://jira.example.test" + path))).isEmpty();
     }
 
     @Test void messagesAreOwnedByThisArtifactAndNeverContainProviderQueries() {
