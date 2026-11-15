@@ -26,7 +26,8 @@ public final class JiraProviderDefinition implements TicketProviderDefinition {
     @Override public String displayName() { return JiraMessages.format("jira.definition.name"); }
     @Override public String adapterId() { return "io.givops.adapter-jira"; }
     @Override public String adapterVersion() { return Artifact.VERSION; }
-    @Override public String sdkApiVersion() { return "0.1"; }
+    @Override public String sdkApiVersion() { return "0.2"; }
+    @Override public Map<String, String> commandLabels() { return Map.of("projectOwner", "Project lead account ID"); }
     @Override public List<String> capabilities() {
         return List.of("ticketing.read", "ticketing.version-membership", "ticketing.reports", "ticketing.release-write");
     }
@@ -42,7 +43,7 @@ public final class JiraProviderDefinition implements TicketProviderDefinition {
     @Override public Optional<IssueReference> issueReference(URI candidate) {
         if (candidate == null || candidate.getRawPath() == null) return Optional.empty();
         var match = ISSUE_PATH.matcher(candidate.getRawPath());
-        return match.matches() ? Optional.of(new IssueReference(match.group(1), "")) : Optional.empty();
+        return match.matches() ? Optional.of(new IssueReference(match.group(1).toUpperCase(java.util.Locale.ROOT), "")) : Optional.empty();
     }
     @Override public URI normalizeBaseUrl(URI value) {
         URI normalized = JiraConnection.origin(value);
