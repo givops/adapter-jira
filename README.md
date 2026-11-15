@@ -32,9 +32,9 @@ Packaging requires a clean committed adapter checkout and records both source an
 
 ## Install or replace
 
-This is an ordinary library JAR, not an executable Spring Boot application. A compatible GivOps host supplies Java 25, Spring Boot 4.0.9, Jackson 3 and SDK API **0.1**. Before 1.0, a different SDK minor version is incompatible. Spring Boot discovers the adapter through `AutoConfiguration.imports`, outside the application's component scan; the host supplies credentials, signing, limits, clock and JSON services.
+This is an ordinary library JAR, not an executable Spring Boot application. A compatible GivOps host supplies Java 25, Spring Boot 4.0.9, Jackson 3 and SDK API **0.2**. Before 1.0, a different SDK minor version is incompatible. Spring Boot discovers the adapter through `AutoConfiguration.imports`, outside the application's component scan; the host supplies credentials, signing, limits, clock and JSON services.
 
-Download and extract a release ZIP, or use `target/adapter-jira-0.1.0-SNAPSHOT.jar` after building. Put exactly one Jira adapter JAR in the host's `/opt/givops/adapters` directory. A read-only directory bind mount replaces the complete bundled adapter set, so include every provider you intend to retain. Replace the prior Jira JAR, then restart the same core image. Do not keep two versions together. The host rejects duplicate provider/artifact registrations and incompatible SDK metadata before use. No core rebuild or live reload is required.
+Download and extract a release ZIP, or use `target/adapter-jira-0.2.0-SNAPSHOT.jar` after building. Put exactly one Jira adapter JAR in the host's `/opt/givops/adapters` directory. A read-only directory bind mount replaces the complete bundled adapter set, so include every provider you intend to retain. Replace the prior Jira JAR, then restart the same core image. Do not keep two versions together. The host rejects duplicate provider/artifact registrations and incompatible SDK metadata before use. No core rebuild or live reload is required.
 
 ## Credentials and API compatibility
 
