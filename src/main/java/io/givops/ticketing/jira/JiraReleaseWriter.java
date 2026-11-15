@@ -1,5 +1,6 @@
 package io.givops.ticketing.jira;
 
+import io.givops.adapters.FailureCategory;
 import io.givops.release.commands.ReleaseCommandModels.Configuration;
 import io.givops.release.commands.ReleaseCommandModels.ExistingReport;
 import io.givops.release.commands.ReleaseCommandModels.Kind;
@@ -30,7 +31,10 @@ public class JiraReleaseWriter implements ReleaseWriteAdapter {
     }
     public static final class WriteFailure extends ReleaseWriteAdapter.WriteFailure {
         public WriteFailure(String code, boolean uncertain) {
-            super(code, uncertain, JiraMessages.format("ticketing.jiraReleaseWriter.the.jira.operation.could.not.be.confirmed"));
+            this(code, uncertain, FailureCategory.UNKNOWN);
+        }
+        public WriteFailure(String code, boolean uncertain, FailureCategory category) {
+            super(code, uncertain, JiraMessages.format("ticketing.jiraReleaseWriter.the.jira.operation.could.not.be.confirmed"), category);
         }
     }
     @Override public TicketProvider provider() { return TicketProvider.JIRA_CLOUD; }
@@ -77,7 +81,7 @@ public class JiraReleaseWriter implements ReleaseWriteAdapter {
                 if (name.equals(JiraReportPayload.text(value, "name", true))) matches.add(id);
             }
             if (last) {
-                if (matches.size() > 1) throw new WriteFailure("release_jira_version_ambiguous", false);
+                if (matches.size() > 1) throw new WriteFailure("release_jira_version_ambiguous", false, FailureCategory.INVALID_RESPONSE);
                 return matches.stream().findFirst().orElse(null);
             }
             offset += values.size();
@@ -101,7 +105,7 @@ public class JiraReleaseWriter implements ReleaseWriteAdapter {
             }
             throw failure;
         } catch (TicketException failure) {
-            throw new WriteFailure("release_jira_version_response_invalid", true);
+            throw new WriteFailure("release_jira_version_response_invalid", true, ticketFailureCategory(failure));
         }
     }
 
@@ -161,7 +165,14 @@ public class JiraReleaseWriter implements ReleaseWriteAdapter {
         fields.put(config.desiredDeliveryDateFieldId(), request.desiredDeliveryDate().toString());
         var root = write(session, "/issue", Map.of("fields", fields), gate);
         try { return report(session, root, request.summary()); }
-        catch (TicketException failure) { throw new WriteFailure("release_jira_report_response_invalid", true); }
+        catch (TicketException failure) { throw new WriteFailure("release_jira_report_response_invalid", true, ticketFailureCategory(failure)); }
+    }
+
+    private static FailureCategory ticketFailureCategory(TicketException failure) {
+        return switch (failure.code()) {
+            case AUTHENTICATION_FAILED, AUTHORIZATION_FAILED -> FailureCategory.ACCESS_DENIED;
+            default -> FailureCategory.INVALID_RESPONSE;
+        };
     }
 
     static Map<String, Object> adf(String text) {
@@ -189,7 +200,13 @@ public class JiraReleaseWriter implements ReleaseWriteAdapter {
         try {
             response = writes.post(owned(session).captured.connection().endpoint(path), owned(session).captured.connection().authorization(),
                     mapper.writeValueAsBytes(body), gate);
-        } catch (JiraWriteTransport.Failure failure) { throw new WriteFailure(failure.code(), failure.uncertain()); }
+        } catch (JiraWriteTransport.Failure failure) {
+            FailureCategory category = switch (failure.code()) {
+                case "release_jira_timeout", "release_jira_interrupted" -> FailureCategory.TRANSIENT;
+                default -> FailureCategory.UNKNOWN;
+            };
+            throw new WriteFailure(failure.code(), failure.uncertain(), category);
+        }
         if (response.status() != 201) {
             int status = response.status();
             String code = switch (status) {
@@ -198,13 +215,19 @@ public class JiraReleaseWriter implements ReleaseWriteAdapter {
                 case 429 -> "release_jira_rate_limited";
                 default -> "release_jira_rejected";
             };
-            throw new WriteFailure(code, status == 408 || status >= 500);
+            FailureCategory category = switch (status) {
+                // Jira may hide a resource when access is revoked; all three must invalidate private observations.
+                case 401, 403, 404 -> FailureCategory.ACCESS_DENIED;
+                case 408, 429 -> FailureCategory.TRANSIENT;
+                default -> status >= 500 ? FailureCategory.TRANSIENT : FailureCategory.INVALID_REQUEST;
+            };
+            throw new WriteFailure(code, status == 408 || status >= 500, category);
         }
         try {
             var result = mapper.readTree(response.body());
             JiraPayload.requireObject(result);
             return result;
-        } catch (RuntimeException failure) { throw new WriteFailure("release_jira_response_invalid", true); }
+        } catch (RuntimeException failure) { throw new WriteFailure("release_jira_response_invalid", true, FailureCategory.INVALID_RESPONSE); }
     }
     @Override public void close() { writes.close(); }
 }

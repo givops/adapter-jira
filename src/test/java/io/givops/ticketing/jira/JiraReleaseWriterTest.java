@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doReturn;
 
+import io.givops.adapters.FailureCategory;
 import io.givops.release.commands.ReleaseCommandModels.Action;
 import io.givops.release.commands.ReleaseCommandModels.Configuration;
 import io.givops.release.commands.ReleaseCommandModels.Kind;
@@ -84,11 +85,16 @@ class JiraReleaseWriterTest {
     }
 
     @Test void write503And429AreNeverRetriedAndProviderBodiesAreNotExposed() {
-        for (int status : List.of(503, 429, 302, 403)) {
+        for (int status : List.of(503, 408, 429, 302, 401, 403, 404)) {
             var f = new Fixture(new Reply(status, "sensitive-provider-body"));
             assertThatThrownBy(() -> f.writer().createVersion(f.session, "100", "1.2", LocalDate.now(), GATE))
                     .isInstanceOfSatisfying(JiraReleaseWriter.WriteFailure.class, e -> {
-                        assertThat(e.uncertain()).isEqualTo(status == 503);
+                        assertThat(e.uncertain()).isEqualTo(status == 503 || status == 408);
+                        assertThat(e.category()).isEqualTo(switch (status) {
+                            case 401, 403, 404 -> FailureCategory.ACCESS_DENIED;
+                            case 302 -> FailureCategory.INVALID_REQUEST;
+                            default -> FailureCategory.TRANSIENT;
+                        });
                         assertThat(e.getMessage()).doesNotContain("sensitive");
                     });
             assertThat(f.requests).hasSize(1);
@@ -99,7 +105,10 @@ class JiraReleaseWriterTest {
         for (String body : List.of("{bad", "x".repeat(2048))) {
             var f = new Fixture(new Reply(201, body));
             assertThatThrownBy(() -> f.writer().createVersion(f.session, "100", "1.2", LocalDate.now(), GATE))
-                    .isInstanceOfSatisfying(JiraReleaseWriter.WriteFailure.class, e -> assertThat(e.uncertain()).isTrue());
+                    .isInstanceOfSatisfying(JiraReleaseWriter.WriteFailure.class, e -> {
+                        assertThat(e.uncertain()).isTrue();
+                        assertThat(e.category()).isEqualTo(body.length() > 1024 ? FailureCategory.UNKNOWN : FailureCategory.INVALID_RESPONSE);
+                    });
             assertThat(f.requests).hasSize(1);
         }
     }
@@ -109,7 +118,10 @@ class JiraReleaseWriterTest {
         doReturn(new CompletableFuture<byte[]>()).when(f.client).sendAsync(any(), any());
         assertThatThrownBy(() -> f.writer().createVersion(f.session, "100", "1.2", LocalDate.now(), new Gate() {
             @Override public Duration beforeRequest() { return Duration.ofMillis(5); }
-        })).isInstanceOfSatisfying(JiraReleaseWriter.WriteFailure.class, e -> assertThat(e.uncertain()).isTrue());
+        })).isInstanceOfSatisfying(JiraReleaseWriter.WriteFailure.class, e -> {
+            assertThat(e.uncertain()).isTrue();
+            assertThat(e.category()).isEqualTo(FailureCategory.TRANSIENT);
+        });
     }
 
     @Test void readsEveryVersionPageAndDoesNotTreatAmbiguousNamesAsMissing() {
@@ -127,6 +139,31 @@ class JiraReleaseWriterTest {
         var duplicate = f.writer().duplicate(f.session, "200", config(VersionShape.STRING), Kind.CAMPAIGN, "1.2", "55", GATE);
         assertThat(duplicate.summary()).isEqualTo("Acquired summary");
         assertThat(f.body(0).path("jql").stringValue()).isEqualTo("project = 200 AND issuetype = 7 ORDER BY id ASC");
+    }
+
+    @Test void hostAuthenticationFailuresPreserveAccessCategoryWithoutSendingOrReplayingWrites() {
+        for (var code : List.of(io.givops.ticketing.model.TicketException.Code.AUTHENTICATION_FAILED,
+                io.givops.ticketing.model.TicketException.Code.AUTHORIZATION_FAILED,
+                io.givops.ticketing.model.TicketException.Code.SUPERSEDED)) {
+            var fixture = new Fixture();
+            assertThatThrownBy(() -> fixture.writer().createVersion(fixture.session, "100", "1.2", LocalDate.now(), new Gate() {
+                @Override public Duration beforeRequest() {
+                    throw new io.givops.ticketing.model.TicketException(code, "Sanitized host refusal.");
+                }
+            })).isInstanceOfSatisfying(JiraReleaseWriter.WriteFailure.class, failure -> {
+                assertThat(failure.category()).isEqualTo(code == io.givops.ticketing.model.TicketException.Code.SUPERSEDED
+                        ? FailureCategory.INVALID_RESPONSE : FailureCategory.ACCESS_DENIED);
+                assertThat(failure.uncertain()).isTrue();
+            });
+            assertThat(fixture.requests).isEmpty();
+        }
+    }
+
+    @Test void oldPublicFailureConstructorRemainsCompatibleAndConservative() {
+        var failure = new JiraReleaseWriter.WriteFailure("custom_failure", true);
+        assertThat(failure.code()).isEqualTo("custom_failure");
+        assertThat(failure.uncertain()).isTrue();
+        assertThat(failure.category()).isEqualTo(FailureCategory.UNKNOWN);
     }
 
     private static Request request(String description) {
