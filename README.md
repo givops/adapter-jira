@@ -2,7 +2,7 @@
 
 An independently built Jira Cloud library for the public [GivOps adapter SDK](https://github.com/givops/adapter-sdk), licensed under [Apache 2.0](LICENSE).
 
-Implemented operations include project metadata, versions, issue reads, assigned issues, complete version membership, configurable test-report metadata and datasets, issue history, release version lookup/creation, and report duplicate detection/creation with text-only ADF. The adapter does not register the generic ticket-write port.
+Implemented operations include project metadata, versions, issue reads, assigned issues, complete version membership, configurable test-report metadata and datasets, issue history, release version lookup/creation, and report duplicate detection/creation with text-only ADF. The adapter also registers the generic ticket-write port for explicit project, version, and issue provisioning.
 
 Provider HTTP calls retain bounded requests and responses, origin validation, cancellation, pagination validation and sanitized failures. Mutating operations are never automatically replayed after an uncertain result.
 
@@ -32,9 +32,9 @@ Packaging requires a clean committed adapter checkout and records both source an
 
 ## Install or replace
 
-This is an ordinary library JAR, not an executable Spring Boot application. A compatible GivOps host supplies Java 25, Spring Boot 4.0.9, Jackson 3 and SDK API **0.3**. Before 1.0, a different SDK minor version is incompatible. Spring Boot discovers the adapter through `AutoConfiguration.imports`, outside the application's component scan; the host supplies credentials, signing, limits, clock and JSON services.
+This is an ordinary library JAR, not an executable Spring Boot application. A compatible GivOps host supplies Java 25, Spring Boot 4.0.9, Jackson 3 and SDK API **0.4**. Before 1.0, a different SDK minor version is incompatible. Spring Boot discovers the adapter through `AutoConfiguration.imports`, outside the application's component scan; the host supplies credentials, signing, limits, clock and JSON services.
 
-Download and extract a release ZIP, or use `target/adapter-jira-0.3.0-SNAPSHOT.jar` after building. Put exactly one Jira adapter JAR in the host's `/opt/givops/adapters` directory. A read-only directory bind mount replaces the complete bundled adapter set, so include every provider you intend to retain. Replace the prior Jira JAR, then restart the same core image. Do not keep two versions together. The host rejects duplicate provider/artifact registrations and incompatible SDK metadata before use. No core rebuild or live reload is required.
+Download and extract a release ZIP, or use `target/adapter-jira-0.4.0-SNAPSHOT.jar` after building. Put exactly one Jira adapter JAR in the host's `/opt/givops/adapters` directory. A read-only directory bind mount replaces the complete bundled adapter set, so include every provider you intend to retain. Replace the prior Jira JAR, then restart the same core image. Do not keep two versions together. The host rejects duplicate provider/artifact registrations and incompatible SDK metadata before use. No core rebuild or live reload is required.
 
 ## Credentials and API compatibility
 
@@ -44,20 +44,18 @@ The API profile is `jira-cloud-rest-v3`. No `serverInfo` request is required. In
 
 English display messages are owned by this artifact at `io/givops/adapters/jira/i18n/en.yml` and formatted through the SDK's MF1 engine. Provider queries, URLs, identifiers and protocol payload values remain code constants.
 
-### SDK API 0.3 compatibility
+### SDK API 0.4 compatibility
 
-This source requires the exact public SDK API 0.3 and artifact version
-0.3.0-SNAPSHOT. Observation acquisition is metadata-only: issue descriptions and
+This source requires the exact public SDK API 0.4 and artifact version
+0.4.0-SNAPSHOT. Observation acquisition is metadata-only: issue descriptions and
 comments are not mapped. Existing creation/write descriptions retain their existing behavior. The adapter registers `ticketing.browse` and `ticketing.content`;
 assets remain unavailable. The `ticketing.navigation` capability supplies provider-owned project
 space links without a content fetch. A global ticket ID does not imply a local
 issue number, so an unknown ticket link remains absent.
 
-The SDK source pin selects public commit
-[`ad5dc81e0378d31a8cb4e80a531dee559adea648`](https://github.com/givops/adapter-sdk/commit/ad5dc81e0378d31a8cb4e80a531dee559adea648),
-which supplies API 0.3. The repository's default build uses that public SDK source;
-no unpublished SDK checkout is required. Browser support is available on the
-`task/provider-browser` source branch. The artifact remains a development snapshot.
+The SDK source pin selects merged API 0.4 commit `762b642cedc1b82bb4915af56313e6e3c194a04f`.
+Run `./scripts/verify.sh` to build and verify against that exact public SDK.
+The artifact remains a development snapshot; a source pin does not imply a tagged release.
 
 
 ### Ticket browser
@@ -103,3 +101,41 @@ bounds in addition to the existing HTTP response and operation budgets.
 The browser HTTP tests use synthetic local TLS fixtures and require no live Jira
 credentials. They cover query construction, scoped cursors, identity checks,
 credential invalidation, cancellation and content conversion/resource limits.
+
+## Explicit provisioning
+
+The generic `TicketWriteAdapter` requires a project key, display name, explicit
+`projectTemplateKey` and optional lead account ID. An omitted lead is resolved from
+the authenticated user through `/myself`, without manual UI setup. Supported templates are the five software
+templates and eight business templates listed by the official
+[create-project API](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-projects/#api-rest-api-3-project-post).
+The adapter validates the Administer Jira permission and active lead before its
+single project-create request, then reads back the authoritative project identity.
+Template availability remains site dependent; Jira's rejection is preserved.
+
+Issue creation resolves non-subtask types through paginated create metadata and
+validates required create-screen fields before mutation. The portable core is
+TASK, OPEN/DONE and optional version membership/assignment. Native priority,
+explicit status and IN_PROGRESS requests are rejected before issue creation.
+DONE uses one unambiguous directly available transition with no unsupplied required
+fields, followed by a fresh issue read. Workflows requiring intermediate transitions
+or additional fields fail explicitly; their states are never fabricated.
+
+Explicit version selectors distinguish NAME from EXTERNAL_ID inside the bound
+project. Legacy `fixVersions` values remain names. Version release/archive flags
+retain Jira semantics. All writes are attempted once; an uncertain transition is
+reconciled with one read, while an uncertain creation requires explicit remote
+reconciliation before another command. Credentials are revalidated at every request
+and before returning results. Tests use synthetic HTTP responses, not a live site.
+
+The implementation follows the official
+[issue metadata and transition API](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/)
+and [version API](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-project-versions/).
+
+Portable built-in issue kinds resolve against create metadata requested with
+`Accept-Language: en-US` and `X-Force-Accept-Language: true`, as documented in
+[Jira's special request headers](https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/#special-request-headers).
+This prevents the authenticated user's display language from changing TASK into
+an unmatched translated name. Explicit `providerType` names keep their native
+locale, duplicate matches fail, and ordinary issue observations retain native
+status/type names. These metadata headers do not change any Jira user settings.

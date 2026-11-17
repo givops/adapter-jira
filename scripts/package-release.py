@@ -24,8 +24,13 @@ for filename, expected in [("verified-sdk.ref", sdk), ("verified-source.ref", co
     evidence = root / "target" / filename
     if not evidence.is_file() or evidence.read_text().strip() != expected:
         raise SystemExit("Run pinned scripts/verify.sh on this commit before release packaging.")
-identity = {"adapterId": "io.givops.adapter-jira", "version": version, "sourceCommit": commit,
-            "sdkCommit": sdk, "sdkApiVersion": "0.3", "domains": "ticketing", "jarSha256": digest}
+with zipfile.ZipFile(artifact) as provider:
+    manifest = dict(line.split("=", 1) for line in
+                    provider.read("META-INF/givops-adapter.properties").decode().splitlines()
+                    if line.strip() and not line.lstrip().startswith("#"))
+identity = {"adapterId": manifest["adapterId"], "version": version, "sourceCommit": commit,
+            "sdkCommit": sdk, "sdkApiVersion": manifest["sdkApiVersion"],
+            "domains": manifest["domains"], "jarSha256": digest}
 output = root / "target" / f"adapter-jira-{version}.zip"
 with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
     for source in [artifact, root / "LICENSE", root / "README.md"]:
