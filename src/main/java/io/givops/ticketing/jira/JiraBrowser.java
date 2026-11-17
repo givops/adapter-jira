@@ -7,6 +7,7 @@ import static io.givops.ticketing.jira.JiraTransport.limitExceeded;
 import io.givops.ticketing.config.TicketProperties;
 import io.givops.ticketing.model.TicketBrowserModels.*;
 import io.givops.ticketing.model.TicketException;
+import io.givops.ticketing.model.TicketScopeModels.Scope;
 import io.givops.ticketing.model.TicketException.Code;
 import io.givops.ticketing.model.TicketModels.IssueObservation;
 import io.givops.ticketing.port.TicketProviderAdapter.Access;
@@ -53,16 +54,22 @@ final class JiraBrowser {
     }
 
     BrowseDescriptor describe(BrowserRequest request, Access access, TicketRequestGate gate) {
-        var read = new Read(request, access, gate);
+        return describe(request, null, access, gate);
+    }
+    BrowseDescriptor describe(BrowserRequest request, Scope scope, Access access, TicketRequestGate gate) {
+        var read = new Read(request, scope, access, gate);
         read.finish();
         return DESCRIPTOR;
     }
 
     TicketPage list(BrowserRequest request, BrowseQuery query, Access access, TicketRequestGate gate) {
-        var read = new Read(request, access, gate);
+        return list(request, null, query, access, gate);
+    }
+    TicketPage list(BrowserRequest request, Scope scope, BrowseQuery query, Access access, TicketRequestGate gate) {
+        var read = new Read(request, scope, access, gate);
         validate(query);
         var body = new LinkedHashMap<String, Object>();
-        body.put("jql", jql(request.externalProjectId(), query)); body.put("fields", FIELDS);
+        body.put("jql", jql(request.externalProjectId(), scope, query)); body.put("fields", JiraScope.fields(FIELDS, scope));
         body.put("maxResults", query.pageSize());
         String previous = read.continuation(query);
         if (previous != null) body.put("nextPageToken", previous);
@@ -90,9 +97,12 @@ final class JiraBrowser {
     }
 
     TicketDetail detail(BrowserRequest request, TicketRef ticket, Access access, TicketRequestGate gate) {
-        var read = new Read(request, access, gate);
+        return detail(request, null, ticket, access, gate);
+    }
+    TicketDetail detail(BrowserRequest request, Scope scope, TicketRef ticket, Access access, TicketRequestGate gate) {
+        var read = new Read(request, scope, access, gate);
         read.validate(ticket);
-        JsonNode row = read.request("/issue/" + ticket.externalIssueId() + "?fields=" + String.join(",", FIELDS), null);
+        JsonNode row = read.request("/issue/" + ticket.externalIssueId() + "?fields=" + String.join(",", JiraScope.fields(FIELDS, scope)), null);
         var observation = read.observation(row);
         read.requireIdentity(ticket, observation);
         gate.acceptedObjects(1);
@@ -103,9 +113,12 @@ final class JiraBrowser {
     }
 
     TicketContent content(BrowserRequest request, TicketRef ticket, Access access, TicketRequestGate gate) {
-        var read = new Read(request, access, gate);
+        return content(request, null, ticket, access, gate);
+    }
+    TicketContent content(BrowserRequest request, Scope scope, TicketRef ticket, Access access, TicketRequestGate gate) {
+        var read = new Read(request, scope, access, gate);
         read.validate(ticket);
-        JsonNode row = read.request("/issue/" + ticket.externalIssueId() + "?fields=project,description", null);
+        JsonNode row = read.request("/issue/" + ticket.externalIssueId() + "?fields=" + String.join(",", JiraScope.fields(List.of("project", "description"), scope)), null);
         read.requireIdentity(ticket, read.observation(row));
         gate.acceptedObjects(1);
         String text = JiraPlainText.description(row.get("fields").get("description"), read.gate);
@@ -129,8 +142,9 @@ final class JiraBrowser {
         return !token.isBlank() && token.length() <= 4096 && token.codePoints().noneMatch(Character::isISOControl);
     }
 
-    private static String jql(String project, BrowseQuery query) {
+    private static String jql(String project, Scope scope, BrowseQuery query) {
         var predicates = new ArrayList<String>(); predicates.add("project = " + project);
+        if (scope != null) predicates.add(JiraScope.predicate(scope));
         if (!query.text().isEmpty()) {
             // Quote a Lucene phrase, then quote that value again for JQL. Never accept raw JQL.
             String literal = query.text().replaceAll("([+\\-!(){}\\[\\]^\"~*?:\\\\/&|])", "\\\\$1");
@@ -153,11 +167,14 @@ final class JiraBrowser {
 
     private final class Read {
         private final BrowserRequest request;
+        private final Scope scope;
         private final JiraAccess.Captured captured;
         private final JiraConnection connection;
         private final TicketRequestGate gate;
         private final SourceRevision revision;
-        Read(BrowserRequest request, Access access, TicketRequestGate gate) {
+        Read(BrowserRequest request, Scope scope, Access access, TicketRequestGate gate) {
+            if (scope != null) JiraScope.require(scope);
+            this.scope = scope;
             if (!limits.enabled()) throw new TicketException(Code.DISABLED,
                     JiraMessages.format("ticketing.jiraAdapter.ticketing.access.is.disabled"));
             gate.check();
@@ -176,9 +193,14 @@ final class JiraBrowser {
             credentials.requireSource(request.source(), captured); credentials.requireCurrent(captured, false);
             connection = captured.connection();
             revision = new SourceRevision("jira-live", hash(captured.context() + "\n" + request.source().revision()
-                    + "\n" + request.ticketProjectId() + "\n" + request.externalProjectId() + "\n" + request.projectKey()), false);
+                    + "\n" + request.ticketProjectId() + "\n" + request.externalProjectId() + "\n" + request.projectKey()
+                    + (scope == null ? "" : "\n" + scopeContext(scope))), false);
             if (request.revision() != null && !revision.equals(request.revision()))
                 throw new TicketException(Code.STALE_CONTEXT, JiraMessages.format("jira.browser.stale"));
+        }
+        String scopeContext(Scope scope) {
+            try { return writer.writeValueAsString(scope); }
+            catch (JacksonException exception) { throw invalidConfiguration(); }
         }
         void validate(TicketRef ticket) {
             if (ticket == null || !request.source().instanceId().equals(ticket.instanceId())
@@ -219,7 +241,21 @@ final class JiraBrowser {
             try { JsonNode root = json.readTree(bytes); JiraPayload.requireObject(root); return root; }
             catch (JacksonException exception) { throw invalidResponse(); }
         }
-        IssueObservation observation(JsonNode row) { return JiraPayload.issue(row, request.externalProjectId(), connection, clock.instant()); }
+        IssueObservation observation(JsonNode row) {
+            if (!JiraScope.matches(row, scope)) throw new TicketException(Code.NOT_FOUND, JiraMessages.format("jira.scope.ticket.outside"));
+            var issue = JiraPayload.issue(row, request.externalProjectId(), connection, clock.instant());
+            if (scope == null) return issue;
+            var eligible = new HashSet<String>();
+            JsonNode versions = row.get("fields").get("fixVersions");
+            if (versions != null && !versions.isNull()) {
+                if (!versions.isArray()) throw invalidResponse();
+                for (var version : versions) {
+                    String name = JiraPayload.text(version, "name", true);
+                    if (scope.canonicalName(name) != null) eligible.add(JiraReportPayload.identifier(version, "id"));
+                }
+            }
+            return JiraScope.issue(issue, eligible);
+        }
         void requireIdentity(TicketRef ticket, IssueObservation observation) {
             if (!ticket.externalIssueId().equals(observation.identity().externalIssueId())) throw invalidResponse();
         }

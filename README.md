@@ -103,3 +103,21 @@ bounds in addition to the existing HTTP response and operation budgets.
 The browser HTTP tests use synthetic local TLS fixtures and require no live Jira
 credentials. They cover query construction, scoped cursors, identity checks,
 credential invalidation, cancellation and content conversion/resource limits.
+
+### Shared repository scopes
+
+The optional `ticketing.repository-scope` capability supports Components and native
+Jira single-select/multi-select custom fields. Configuration discovery returns
+stable IDs and explicit availability states. Custom option activation verifies a
+single applicable project context covering all issue types; ambiguous or restricted
+contexts remain unavailable. Disabled/deleted options cannot activate a binding.
+Jira administration permission may be required for custom-field setup; ordinary
+scoped reads use the validated configuration without repeating administration APIs.
+
+Each read combines project, selected value and operation predicates, then checks
+returned ID membership. Multi-valued issues can belong to both selected bindings.
+Direct detail/content also request and check the partition field. Browser revisions
+and continuations include the complete binding scope. Exact version prefixes retain
+native IDs/names and expose separate canonical names; pagination advances by raw
+provider rows. Ordinary report acquisition keeps module attribution independent of
+report routing and report-field mappings.

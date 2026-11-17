@@ -71,6 +71,40 @@ class JiraBrowserHttpTest {
         clientTls = SSLContext.getInstance("TLS"); clientTls.init(null, tm.getTrustManagers(), null);
     }
 
+    private static io.givops.ticketing.model.TicketScopeModels.Scope scope(UUID binding, String value) {
+        return new io.givops.ticketing.model.TicketScopeModels.Scope(binding,
+                new io.givops.ticketing.model.TicketScopeModels.Field("components", "Components",
+                io.givops.ticketing.model.TicketScopeModels.ValueKind.COMPONENT,
+                io.givops.ticketing.model.TicketScopeModels.Cardinality.MANY,
+                io.givops.ticketing.model.TicketScopeModels.Match.CONTAINS,
+                io.givops.adapters.CapabilityInspection.State.AVAILABLE, null), value, "Back ", 2, 3);
+    }
+    private static String component(String row, String values) {
+        return row.replace("\"fields\":{", "\"fields\":{\"components\":" + values + ",");
+    }
+    @Test void scopedDirectDetailAndContentCannotReadKnownForeignIssueIds() throws Exception {
+        try (var f = new Fixture(page("", null), component(issue("30001", "APP-1", "10101", "Foreign", "[]"), "[{\"id\":\"42\"}]"),
+                component(contentRow("30001", "10101", "\"SECRET-FOREIGN-BODY\""), "[{\"id\":\"42\"}]"))) {
+            var scope = scope(f.binding, "41");
+            var page = f.adapter.listScoped(f.request(null), scope, query("", null), f.access, f.gate);
+            failure(Code.NOT_FOUND, () -> f.adapter.detailScoped(f.request(null), scope, f.ref("30001"), f.access, f.gate));
+            failure(Code.NOT_FOUND, () -> f.adapter.contentScoped(f.request(page.revision()), scope, f.ref("30001"), f.access, f.gate));
+            assertThat(f.calls.get(2).path()).contains("components");
+        }
+    }
+    @Test void scopedCursorAndContentRevisionBindValueAndPolicy() throws Exception {
+        String row = component(issue("30001", "APP-1", "10101", "Shared", "[]"), "[{\"id\":\"41\"},{\"id\":\"42\"}]")
+                .replace("\"id\":\"20001\"", "\"id\":\"20001\",\"name\":\"Back 1.0.0\"");
+        try (var f = new Fixture(page(row, "next"), component(contentRow("30001", "10101", "\"Scoped body\""), "[{\"id\":\"41\"}]"))) {
+            var back = scope(f.binding, "41"); var front = scope(f.binding, "42");
+            var page = f.adapter.listScoped(f.request(null), back, query("", null), f.access, f.gate);
+            assertThat(page.items()).hasSize(1);
+            assertThat(JSON.readTree(f.calls.getFirst().body()).get("jql").stringValue()).contains("component = 41");
+            failure(Code.INVALID_CONFIGURATION, () -> f.adapter.listScoped(f.request(null), front, query("", page.nextContinuation()), f.access, f.gate));
+            failure(Code.STALE_CONTEXT, () -> f.adapter.contentScoped(f.request(page.revision()), front, f.ref("30001"), f.access, f.gate));
+            assertThat(f.adapter.contentScoped(f.request(page.revision()), back, f.ref("30001"), f.access, f.gate).text()).isEqualTo("Scoped body");
+        }
+    }
     @Test void describesCapabilitiesWithoutHttpAndRejectsForgedSnapshotRevision() throws Exception {
         try (var f = new Fixture()) {
             var descriptor = f.adapter.describe(f.request(null), f.access, f.gate);

@@ -56,6 +56,31 @@ class JiraReportAdapterTest {
     private static final FieldMapping STANDARD = new FieldMapping(new FieldRef("project", Extractor.PROJECT_ID),
             new FieldRef("fixVersions", Extractor.VERSION_IDS), null);
 
+    @Test void scopedOrdinaryDatasetRetainsModuleAttributionAndCanonicalNativeVersions() {
+        var base = input(CUSTOM); var module = base.ordinaryProjects().getFirst().projectId();
+        var scope = new io.givops.ticketing.model.TicketScopeModels.Scope(module,
+                new io.givops.ticketing.model.TicketScopeModels.Field("customfield_10003", "Repository",
+                io.givops.ticketing.model.TicketScopeModels.ValueKind.OPTION,
+                io.givops.ticketing.model.TicketScopeModels.Cardinality.ONE,
+                io.givops.ticketing.model.TicketScopeModels.Match.EQUALS,
+                io.givops.adapters.CapabilityInspection.State.AVAILABLE, null), "55", "Back ", 1, 2);
+        var scoped = new ReportInput(SOURCE, base.sourceProjects(), base.issueTypeIds(), base.mapping(), base.statuses(),
+                List.of(new OrdinaryProject(module, PROJECT, "100", "TQ", scope)));
+        var fixture = new Fixture(new Reply("{\"startAt\":0,\"maxResults\":100,\"total\":2,\"isLast\":false,\"values\":[" + version("502", "Front 1.0") + "]}"),
+                new Reply("{\"startAt\":1,\"maxResults\":100,\"total\":2,\"isLast\":true,\"values\":[" + version("501", "Back 1.0") + "]}"),
+                new Reply(page(issue("201", null, null, "{\"id\":\"55\",\"value\":\"Renamed\"}") + "," + issue("202", null, null, "{\"id\":\"56\"}"), null)),
+                new Reply(history("201", "", null)));
+        var adapter = fixture.adapter(limits(100, 5000, 2000));
+        var result = adapter.ordinaryVersionsScoped(scoped, scope, adapter.captureAccess(SOURCE), new Gate());
+        assertThat(result.scope()).isEqualTo(scope); assertThat(result.projectId()).isEqualTo(module);
+        assertThat(result.dataset().versions()).singleElement().satisfies(version -> {
+            assertThat(version.name()).isEqualTo("Back 1.0"); assertThat(version.canonicalName()).isEqualTo("1.0");
+        });
+        assertThat(result.dataset().issues()).singleElement().satisfies(issue -> assertThat(issue.versionIds()).containsExactly("501"));
+        assertThat(fixture.requests.get(1).uri().getQuery()).contains("startAt=1");
+        assertThat(fixture.body(2).get("jql").stringValue()).contains("cf[10003] = 55");
+        assertThatThrownBy(() -> adapter.ordinaryVersions(scoped, adapter.captureAccess(SOURCE), new Gate())).isInstanceOf(TicketException.class);
+    }
     @Test
     void drainsSearchAndBulkHistoryPagesWithoutDependingOnEmbeddedHistory() {
         var fixture = new Fixture(new Reply(page(issue("201", "\"product-a\"", "\"1.2\"", "{\"id\":\"55\",\"value\":\"Core\"}"), "search-token\"\\")),

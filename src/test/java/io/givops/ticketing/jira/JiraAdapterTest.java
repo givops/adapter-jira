@@ -74,6 +74,123 @@ class JiraAdapterTest {
             {"isLast":true,"issues":[]}
             """;
 
+    private static io.givops.ticketing.model.TicketScopeModels.Scope scope() {
+        return new io.givops.ticketing.model.TicketScopeModels.Scope(BINDING_ID,
+                new io.givops.ticketing.model.TicketScopeModels.Field("components", "Components",
+                io.givops.ticketing.model.TicketScopeModels.ValueKind.COMPONENT,
+                io.givops.ticketing.model.TicketScopeModels.Cardinality.MANY,
+                io.givops.ticketing.model.TicketScopeModels.Match.CONTAINS,
+                io.givops.adapters.CapabilityInspection.State.AVAILABLE, null), "41", "Back ", 2, 3);
+    }
+    private static String scopedIssue(String id, String key, String component) {
+        return issue(id, key, PROJECT_ID, "20002").replace("\"summary\":", "\"components\":[{\"id\":\"" + component + "\"}],\"summary\":");
+    }
+    @Test void scopeFiltersKeysAssignmentsAndReleaseAndKeepsRawVersionPaging() {
+        var fixture = new Fixture(new Reply(PROJECT),
+                new Reply("{\"startAt\":0,\"maxResults\":100,\"total\":2,\"isLast\":false,\"values\":[" + version("20001", "Front 1.0.0") + "]}"),
+                new Reply("{\"startAt\":1,\"maxResults\":100,\"total\":2,\"isLast\":true,\"values\":[" + version("20002", "Back 1.0.0") + "]}"),
+                new Reply(issuePage(scopedIssue("30001", "APP-1", "41") + "," + scopedIssue("30002", "APP-2", "42"), null)),
+                new Reply(issuePage(scopedIssue("30001", "APP-1", "41"), null)), new Reply(EMPTY_ISSUES));
+        var adapter = fixture.adapter(settings(null), LIMITS);
+        var result = adapter.readScoped(input(SOURCE, Set.of("APP-1", "APP-2"), "1.0.0"), scope(), new Gate(), adapter.captureAccess(SOURCE));
+        io.givops.adapters.testkit.AdapterTestkit.verifyScopedSnapshot(scope(), result);
+        var project = result.snapshot().projects().getFirst();
+        assertThat(project.versions()).singleElement().satisfies(version -> {
+            assertThat(version.name()).isEqualTo("Back 1.0.0"); assertThat(version.canonicalName()).isEqualTo("1.0.0");
+        });
+        assertThat(project.issues()).extracting(IssueObservation::issueKey).containsExactly("APP-1");
+        assertThat(project.unresolvedKeys()).containsExactly("APP-2");
+        assertThat(project.releaseMembership().state()).isEqualTo(ReleaseMappingState.MATCHED);
+        assertThat(fixture.requests.get(2).uri().getQuery()).contains("startAt=1");
+        assertThat(fixture.body(3).get("jql").stringValue()).contains("project = 10101 AND component = 41 AND (key in");
+        assertThat(fixture.body(3).get("fields").toString()).contains("components");
+    }
+    @Test void scopedAssignmentsKeepIssuesWithoutFixVersionsAndMultipleMatchingValues() {
+        String both = assignedIssue(1).replace("\"fixVersions\":[]", "\"components\":[{\"id\":\"41\"},{\"id\":\"42\"}],\"fixVersions\":[]");
+        String foreign = assignedIssue(2).replace("\"fixVersions\":[]", "\"components\":[{\"id\":\"42\"}],\"fixVersions\":[]");
+        var fixture = new Fixture(new Reply(PROJECT), new Reply(EMPTY_VERSIONS), new Reply(issuePage(both + "," + foreign, null)));
+        var adapter = fixture.adapter(settings(null), LIMITS);
+        var result = adapter.readScoped(input(SOURCE, Set.of(), null), scope(), new Gate(), adapter.captureAccess(SOURCE));
+        var project = result.snapshot().projects().getFirst();
+        assertThat(project.assignedIssues()).containsExactly(new IssueIdentity(PROJECT_ID, "30001"));
+        assertThat(project.issues()).singleElement().satisfies(issue -> assertThat(issue.releaseVersionIds()).isEmpty());
+    }
+    @Test void scopedVersionSelectionReceivesCanonicalNamesAndFiltersNativeMemberships() {
+        var fixture = new Fixture(new Reply(versions(version("20001", "Front 1.0.0") + "," + version("20002", "Back 1.0.0"))),
+                new Reply(issuePage(scopedIssue("30001", "APP-1", "41"), null)));
+        var adapter = fixture.adapter(settings(null), LIMITS);
+        var result = adapter.readVersionMembershipsScoped(SOURCE, input(SOURCE, Set.of(), null).projects().getFirst(), scope(),
+                adapter.captureAccess(SOURCE), new Gate(), versions -> {
+                    assertThat(versions).extracting(v -> v.canonicalName()).containsExactly("1.0.0"); return Set.of("20002");
+                }, 10, 100);
+        assertThat(result.scope()).isEqualTo(scope());
+        assertThat(result.memberships().members().get("20002")).hasSize(1);
+    }
+    private static String metadataPage(String rows) {
+        return "{\"startAt\":0,\"maxResults\":100,\"total\":1,\"isLast\":true,\"values\":[" + rows + "]}";
+    }
+    private static final String SCOPE_FIELDS = """
+        [{"id":"components","name":"Components","schema":{"type":"array","items":"component","system":"components"}},
+         {"id":"customfield_101","name":"Single","schema":{"type":"option","custom":"com.atlassian.jira.plugin.system.customfieldtypes:select"}},
+         {"id":"customfield_102","name":"Multi","schema":{"type":"array","items":"option","custom":"com.atlassian.jira.plugin.system.customfieldtypes:multiselect"}},
+         {"id":"customfield_103","name":"Text","schema":{"type":"string","custom":"com.atlassian.jira.plugin.system.customfieldtypes:textfield"}}]
+        """;
+    @Test void malformedMetadataCannotActivateAFieldOrBecomeSuccessfulEmptyEnumeration() {
+        for (String response : List.of("[{\"id\":\"components\",\"id\":\"customfield_101\"}]", SCOPE_FIELDS + " {}")) {
+            var fixture = new Fixture(new Reply(response)); var adapter = fixture.adapter(settings(null), LIMITS);
+            var fields = adapter.fields(SOURCE, PROJECT_ID, adapter.captureAccess(SOURCE), new Gate());
+            assertThat(fields.state()).isEqualTo(io.givops.adapters.CapabilityInspection.State.UNKNOWN);
+            assertThat(fields.fields()).isEmpty();
+        }
+    }
+    @Test void metadataAdvertisesOnlyVerifiedNativeSelectProfiles() {
+        var fixture = new Fixture(new Reply(SCOPE_FIELDS)); var adapter = fixture.adapter(settings(null), LIMITS);
+        var result = adapter.fields(SOURCE, PROJECT_ID, adapter.captureAccess(SOURCE), new Gate());
+        assertThat(result.state()).isEqualTo(io.givops.adapters.CapabilityInspection.State.AVAILABLE);
+        assertThat(result.fields()).filteredOn(field -> field.state() == io.givops.adapters.CapabilityInspection.State.AVAILABLE)
+                .extracting(field -> field.id()).containsExactly("components", "customfield_101", "customfield_102");
+        assertThat(result.fields().getLast().state()).isEqualTo(io.givops.adapters.CapabilityInspection.State.UNSUPPORTED);
+    }
+    @Test void metadataValidatesOptionsWithinTheBoundProjectContextAndRetainsDisabledIds() {
+        var fixture = new Fixture(new Reply(SCOPE_FIELDS),
+                new Reply(metadataPage("{\"contextId\":501,\"projectId\":10101}")),
+                new Reply(metadataPage("{\"id\":\"501\",\"isAnyIssueType\":true,\"isGlobalContext\":false}")),
+                new Reply("{\"startAt\":0,\"maxResults\":100,\"total\":2,\"isLast\":true,\"values\":[{\"id\":\"41\",\"value\":\"Renamed Back\",\"disabled\":false},{\"id\":\"42\",\"value\":\"Back\",\"disabled\":true}]}"));
+        var adapter = fixture.adapter(settings(null), LIMITS);
+        var values = adapter.values(SOURCE, PROJECT_ID, "customfield_102", adapter.captureAccess(SOURCE), new Gate());
+        assertThat(values.state()).isEqualTo(io.givops.adapters.CapabilityInspection.State.AVAILABLE);
+        assertThat(values.values()).extracting(value -> value.id()).containsExactly("41", "42");
+        assertThat(values.values().getLast().state()).isEqualTo(io.givops.adapters.CapabilityInspection.State.DISABLED);
+        assertThat(fixture.requests.getLast().uri().getPath()).contains("/context/501/option");
+    }
+    @Test void metadataDenialAndAmbiguousContextsCannotBecomeEmptySuccessfulOptions() {
+        var denied = new Fixture(new Reply(403, Map.of(), "{}")); var adapter = denied.adapter(settings(null), LIMITS);
+        assertThat(adapter.values(SOURCE, PROJECT_ID, "components", adapter.captureAccess(SOURCE), new Gate()).state())
+                .isEqualTo(io.givops.adapters.CapabilityInspection.State.FORBIDDEN);
+        var fixture = new Fixture(new Reply(SCOPE_FIELDS), new Reply("{\"startAt\":0,\"maxResults\":100,\"total\":2,\"isLast\":true,\"values\":[{\"contextId\":\"501\",\"projectId\":\"10101\"},{\"contextId\":\"502\",\"isGlobalContext\":true}]}"));
+        var ambiguous = fixture.adapter(settings(null), LIMITS);
+        assertThat(ambiguous.values(SOURCE, PROJECT_ID, "customfield_101", ambiguous.captureAccess(SOURCE), new Gate()).diagnostic())
+                .isEqualTo("AMBIGUOUS_PROJECT_CONTEXT");
+        assertThat(fixture.requests).hasSize(2);
+    }
+    @Test void componentOwnersAcceptNumericIdentifiersAndRejectForeignOwners() {
+        for (String owner : List.of("10101", "\"10101\"", "10202")) {
+            var fixture = new Fixture(new Reply(metadataPage("{\"id\":41,\"name\":\"Back\",\"projectId\":" + owner + "}")));
+            var adapter = fixture.adapter(settings(null), LIMITS);
+            var values = adapter.values(SOURCE, PROJECT_ID, "components", adapter.captureAccess(SOURCE), new Gate());
+            assertThat(values.state()).isEqualTo(owner.equals("10202") ? io.givops.adapters.CapabilityInspection.State.UNKNOWN
+                    : io.givops.adapters.CapabilityInspection.State.AVAILABLE);
+            if (!owner.equals("10202")) assertThat(values.values()).extracting(value -> value.id()).containsExactly("41");
+        }
+    }
+    @Test void componentActivationChecksStableIdsAndSchemaRatherThanLabels() {
+        var fixture = new Fixture(new Reply(SCOPE_FIELDS), new Reply(metadataPage("{\"id\":\"41\",\"name\":\"Renamed Back\",\"projectId\":\"10101\"}")),
+                new Reply(SCOPE_FIELDS), new Reply(metadataPage("{\"id\":\"42\",\"name\":\"Components\",\"projectId\":\"10101\"}")));
+        var adapter = fixture.adapter(settings(null), LIMITS); var access = adapter.captureAccess(SOURCE);
+        assertThat(adapter.validateScope(SOURCE, PROJECT_ID, scope(), access, new Gate()).state())
+                .isEqualTo(io.givops.adapters.CapabilityInspection.State.AVAILABLE);
+        assertThat(adapter.validateScope(SOURCE, PROJECT_ID, scope(), access, new Gate()).reason()).isEqualTo("VALUE_NOT_FOUND");
+    }
     @Test void navigatesToBoundProviderSpaceWithoutCollectingContent() {
         var fixture = new Fixture(); var adapter = fixture.adapter(settings(null), LIMITS);
         var request = new io.givops.ticketing.model.TicketBrowserModels.BrowserRequest(SOURCE, BINDING_ID, PROJECT_ID, "APP", null, NOW);
