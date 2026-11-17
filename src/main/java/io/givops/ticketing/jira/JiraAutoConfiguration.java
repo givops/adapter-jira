@@ -31,6 +31,9 @@ public class JiraAutoConfiguration {
                                               TestReportProperties limits, JsonMapper mapper, Clock clock) {
         return new JiraReportAdapter(credentials, transport, limits, mapper, clock);
     }
+    @Bean JiraTicketWriter jiraTicketWriter(JiraAccess credentials, JiraTransport transport, TicketProperties limits, JsonMapper mapper, Clock clock) {
+        return new JiraTicketWriter(credentials,transport,limits,mapper,clock);
+    }
     @Bean JiraReleaseWriter jiraReleaseWriter(JiraAccess credentials, JiraTransport transport,
                                               JsonMapper mapper, TicketProperties limits) {
         return new JiraReleaseWriter(credentials, transport, mapper, limits);

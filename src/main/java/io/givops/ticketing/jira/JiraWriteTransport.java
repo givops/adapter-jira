@@ -63,7 +63,7 @@ final class JiraWriteTransport implements AutoCloseable {
         @Override public CompletionStage<byte[]> getBody() { return result; }
         @Override public void onSubscribe(Flow.Subscription subscription) {
             this.subscription = subscription;
-            if (status != 201) {
+            if (status != 201 && status != 204) {
                 // The status is sufficient; never retain or expose provider error bodies.
                 result.complete(new byte[0]);
                 subscription.cancel();

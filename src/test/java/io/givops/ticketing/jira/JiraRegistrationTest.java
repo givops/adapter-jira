@@ -44,14 +44,14 @@ class JiraRegistrationTest {
                             .hasSingleBean(TicketProviderAdapter.class).hasSingleBean(TestReportProviderAdapter.class)
                             .hasSingleBean(io.givops.ticketing.port.TicketBrowseAdapter.class)
                             .hasSingleBean(io.givops.ticketing.port.TicketContentAdapter.class)
-                            .hasSingleBean(ReleaseWriteAdapter.class).doesNotHaveBean(TicketWriteAdapter.class);
+                            .hasSingleBean(ReleaseWriteAdapter.class).hasSingleBean(TicketWriteAdapter.class);
                     var definition = context.getBean(TicketProviderDefinition.class);
                     AdapterTestkit.verifyDefinition(definition);
-                    assertThat(definition.sdkApiVersion()).isEqualTo("0.3");
-                    assertThat(definition.capabilities()).containsExactly("ticketing.read", "ticketing.browse", "ticketing.content", "ticketing.navigation", "ticketing.version-membership",
+                    assertThat(definition.sdkApiVersion()).isEqualTo("0.4");
+                    assertThat(definition.capabilities()).containsExactly("ticketing.project-create", "ticketing.version-create", "ticketing.issue-create", "ticketing.read", "ticketing.browse", "ticketing.content", "ticketing.navigation", "ticketing.version-membership",
                             "ticketing.reports", "ticketing.release-write");
                     assertThat(definition.apiProfiles()).containsExactly("jira-cloud-rest-v3");
-                    assertThat(definition.adapterVersion()).isEqualTo("0.3.0-SNAPSHOT");
+                    assertThat(definition.adapterVersion()).isEqualTo("0.4.0-SNAPSHOT");
                     assertThat(captures).hasValue(0);
                 });
     }
@@ -67,6 +67,12 @@ class JiraRegistrationTest {
                 .containsEntry("provider", definition.provider().name())
                 .containsEntry("adapterVersion", definition.adapterVersion())
                 .containsEntry("sdkApiVersion", definition.sdkApiVersion());
+        var legacy = new Properties();
+        try (var stream = getClass().getResourceAsStream("/META-INF/givops/adapter-jira.properties")) {
+            assertThat(stream).isNotNull();
+            legacy.load(stream);
+        }
+        assertThat(legacy).containsEntry("sdk-api-version", definition.sdkApiVersion());
     }
 
     @Test void validatesProviderCredentialsWithoutPrivateHostServicesOrQueries() {
