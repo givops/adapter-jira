@@ -74,6 +74,12 @@ class JiraAdapterTest {
             {"isLast":true,"issues":[]}
             """;
 
+    @Test void navigatesToBoundProviderSpaceWithoutCollectingContent() {
+        var fixture = new Fixture(); var adapter = fixture.adapter(settings(null), LIMITS);
+        var request = new io.givops.ticketing.model.TicketBrowserModels.BrowserRequest(SOURCE, BINDING_ID, PROJECT_ID, "APP", null, NOW);
+        assertThat(adapter.navigate(request, null, adapter.captureAccess(SOURCE), new Gate()).spaceUrl()).isEqualTo(SITE.resolve("/browse/APP"));
+        assertThat(fixture.requests).isEmpty();
+    }
     @Test
     void releaseSearchResolvesARequestedKeyOmittedByTheEarlierKeySearch() {
         var fixture = new Fixture(
@@ -132,6 +138,7 @@ class JiraAdapterTest {
             assertThat(issue.identity()).isEqualTo(new IssueIdentity(PROJECT_ID, "30001"));
             assertThat(issue.webUrl()).isEqualTo(SITE.resolve("/browse/APP-1"));
             assertThat(issue.summary()).isEqualTo("Synthetic issue");
+            assertThat(issue.description()).isNull();
             assertThat(issue.type()).isEqualTo("Task");
             assertThat(issue.status()).isEqualTo("In Progress");
             assertThat(issue.statusCategory()).isEqualTo("indeterminate");
@@ -456,7 +463,7 @@ class JiraAdapterTest {
 
     private static String issue(String id, String key, String projectId, String versionId) {
         return """
-                {"id":"%s","key":"%s","fields":{"project":{"id":"%s"},"summary":"Synthetic issue",
+                {"id":"%s","key":"%s","fields":{"project":{"id":"%s"},"summary":"Synthetic issue","description":"TICKET-BODY-MUST-NOT-SURVIVE",
                   "issuetype":{"name":"Task"},"status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}},
                   "priority":{"name":"Medium"},"resolution":null,"created":"2026-10-01T14:30:00.000+0200",
                   "updated":"2026-10-09T10:00:00Z","fixVersions":[{"id":"%s"}]}}

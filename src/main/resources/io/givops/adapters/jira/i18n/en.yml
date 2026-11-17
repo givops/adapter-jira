@@ -28,3 +28,5 @@ jira:
     email: Atlassian account email
     token: API token
     cloud-id: Cloud ID (scoped tokens only)
+
+jira.browser.stale: "The Jira browser context has changed."
