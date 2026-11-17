@@ -32,3 +32,9 @@ jira:
 jira.browser.stale: "The Jira browser context has changed."
 
 "jira.scope.ticket.outside": "The ticket is outside this repository scope."
+jira.provisioning.invalid: "Invalid Jira provisioning command. Project creation requires an explicit supported template and an active project lead."
+jira.provisioning.unsupported: "The Jira template, issue fields, or direct workflow transition does not support the requested provisioning command."
+jira.provisioning.denied: "Jira project creation requires the Administer Jira permission."
+jira.provisioning.disabled: "Jira provisioning is disabled."
+jira.provisioning.uncertain: "The Jira write outcome is uncertain. Reconcile the remote resource before submitting another command."
+jira.provisioning.rejected: "Jira rejected the provisioning command. Reconcile any partial resource before submitting another command."

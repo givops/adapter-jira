@@ -45,8 +45,21 @@ final class JiraTransport implements AutoCloseable {
     }
 
     byte[] read(URI uri, String authorization, byte[] searchBody, TicketRequestGate gate, long responseLimit) {
+        return read(uri, authorization, searchBody, gate, responseLimit, false);
+    }
+
+    /** Built-in issue type names in create metadata follow the user's locale unless explicitly forced. */
+    byte[] readEnglishMetadata(URI uri, String authorization, TicketRequestGate gate) {
+        return read(uri, authorization, null, gate, maxResponseBytes, true);
+    }
+
+    private byte[] read(URI uri, String authorization, byte[] searchBody, TicketRequestGate gate,
+                        long responseLimit, boolean englishMetadata) {
         var request = HttpRequest.newBuilder(uri).header("Accept", "application/json")
                 .header("Accept-Encoding", "identity").header("Authorization", authorization);
+        if (englishMetadata) {
+            request.header("Accept-Language", "en-US").header("X-Force-Accept-Language", "true");
+        }
         if (searchBody == null) {
             request.GET();
         } else {
