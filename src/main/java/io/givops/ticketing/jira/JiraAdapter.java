@@ -1,5 +1,9 @@
 package io.givops.ticketing.jira;
 
+import io.givops.ticketing.model.TicketBrowserModels.*;
+import io.givops.ticketing.port.TicketNavigationAdapter;
+import io.givops.ticketing.port.TicketBrowseAdapter;
+import io.givops.ticketing.port.TicketContentAdapter;
 import static io.givops.ticketing.jira.JiraConnection.invalidConfiguration;
 import static io.givops.ticketing.jira.JiraPayload.invalidResponse;
 import static io.givops.ticketing.jira.JiraTransport.limitExceeded;
@@ -42,7 +46,7 @@ import tools.jackson.databind.ObjectReader;
 import tools.jackson.databind.ObjectWriter;
 import tools.jackson.databind.json.JsonMapper;
 
-public final class JiraAdapter implements TicketProviderAdapter {
+public final class JiraAdapter implements TicketProviderAdapter, TicketNavigationAdapter, TicketBrowseAdapter, TicketContentAdapter {
     private static final int PAGE_SIZE = 100;
     private static final int MAX_PAGE_TOKEN_LENGTH = 8192;
     private static final List<String> ISSUE_FIELDS = List.of("project", "summary", "issuetype", "status",
@@ -54,6 +58,7 @@ public final class JiraAdapter implements TicketProviderAdapter {
     private final Clock clock;
     private final ObjectReader json;
     private final ObjectWriter writer;
+    private final JiraBrowser browser;
 
     JiraAdapter(JiraAccess credentials, TicketProperties limits, JiraTransport transport,
                 JsonMapper mapper, Clock clock) {
@@ -64,6 +69,7 @@ public final class JiraAdapter implements TicketProviderAdapter {
         this.json = mapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
                 .with(StreamReadFeature.STRICT_DUPLICATE_DETECTION);
         this.writer = mapper.writer();
+        this.browser = new JiraBrowser(credentials, limits, transport, mapper, clock);
     }
 
     @Override
@@ -382,5 +388,24 @@ public final class JiraAdapter implements TicketProviderAdapter {
         private List<IssueObservation> values() {
             return List.copyOf(byId.values());
         }
+    }
+    /** Provider-space navigation is available independently of rich content; global IDs cannot infer issue numbers. */
+    @Override public Navigation navigate(BrowserRequest request, TicketRef ticket, Access access, TicketRequestGate gate) {
+        gate.check();
+        validateQueries(List.of(new ProjectQuery(request.ticketProjectId(), request.externalProjectId(), request.projectKey(), Set.of(), null)));
+        if (!current(request.source(), access, false)) throw new TicketException(Code.SUPERSEDED, JiraMessages.format("jira.credentials.changed"));
+        return new Navigation(((JiraAccess.Captured) access).connection().browse(request.projectKey()), null);
+    }
+    @Override public BrowseDescriptor describe(BrowserRequest request, Access access, TicketRequestGate gate) {
+        return browser.describe(request, access, gate);
+    }
+    @Override public TicketPage list(BrowserRequest request, BrowseQuery query, Access access, TicketRequestGate gate) {
+        return browser.list(request, query, access, gate);
+    }
+    @Override public TicketDetail detail(BrowserRequest request, TicketRef ticket, Access access, TicketRequestGate gate) {
+        return browser.detail(request, ticket, access, gate);
+    }
+    @Override public TicketContent content(BrowserRequest request, TicketRef ticket, Access access, TicketRequestGate gate) {
+        return browser.content(request, ticket, access, gate);
     }
 }

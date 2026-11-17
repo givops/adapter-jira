@@ -42,14 +42,16 @@ class JiraRegistrationTest {
                 }).run(context -> {
                     assertThat(context).hasNotFailed().hasSingleBean(TicketProviderDefinition.class)
                             .hasSingleBean(TicketProviderAdapter.class).hasSingleBean(TestReportProviderAdapter.class)
+                            .hasSingleBean(io.givops.ticketing.port.TicketBrowseAdapter.class)
+                            .hasSingleBean(io.givops.ticketing.port.TicketContentAdapter.class)
                             .hasSingleBean(ReleaseWriteAdapter.class).doesNotHaveBean(TicketWriteAdapter.class);
                     var definition = context.getBean(TicketProviderDefinition.class);
                     AdapterTestkit.verifyDefinition(definition);
-                    assertThat(definition.sdkApiVersion()).isEqualTo("0.2");
-                    assertThat(definition.capabilities()).containsExactly("ticketing.read", "ticketing.version-membership",
+                    assertThat(definition.sdkApiVersion()).isEqualTo("0.3");
+                    assertThat(definition.capabilities()).containsExactly("ticketing.read", "ticketing.browse", "ticketing.content", "ticketing.navigation", "ticketing.version-membership",
                             "ticketing.reports", "ticketing.release-write");
                     assertThat(definition.apiProfiles()).containsExactly("jira-cloud-rest-v3");
-                    assertThat(definition.adapterVersion()).isEqualTo("0.2.0-SNAPSHOT");
+                    assertThat(definition.adapterVersion()).isEqualTo("0.3.0-SNAPSHOT");
                     assertThat(captures).hasValue(0);
                 });
     }
