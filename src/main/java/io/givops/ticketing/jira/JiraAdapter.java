@@ -46,7 +46,13 @@ import tools.jackson.databind.ObjectReader;
 import tools.jackson.databind.ObjectWriter;
 import tools.jackson.databind.json.JsonMapper;
 
-public final class JiraAdapter implements TicketProviderAdapter, TicketNavigationAdapter, TicketBrowseAdapter, TicketContentAdapter {
+import io.givops.ticketing.model.TicketScopeModels.*;
+import io.givops.ticketing.port.TicketScopedProviderAdapter;
+import io.givops.ticketing.port.TicketScopedBrowseAdapter;
+import io.givops.ticketing.port.TicketRepositoryScopeAdapter;
+import io.givops.adapters.CapabilityInspection;
+
+public final class JiraAdapter implements TicketScopedProviderAdapter, TicketScopedBrowseAdapter, TicketRepositoryScopeAdapter, TicketProviderAdapter, TicketNavigationAdapter, TicketBrowseAdapter, TicketContentAdapter {
     private static final int PAGE_SIZE = 100;
     private static final int MAX_PAGE_TOKEN_LENGTH = 8192;
     private static final List<String> ISSUE_FIELDS = List.of("project", "summary", "issuetype", "status",
@@ -59,6 +65,7 @@ public final class JiraAdapter implements TicketProviderAdapter, TicketNavigatio
     private final ObjectReader json;
     private final ObjectWriter writer;
     private final JiraBrowser browser;
+    private final JiraScopeMetadata scopeMetadata;
 
     JiraAdapter(JiraAccess credentials, TicketProperties limits, JiraTransport transport,
                 JsonMapper mapper, Clock clock) {
@@ -70,6 +77,7 @@ public final class JiraAdapter implements TicketProviderAdapter, TicketNavigatio
                 .with(StreamReadFeature.STRICT_DUPLICATE_DETECTION);
         this.writer = mapper.writer();
         this.browser = new JiraBrowser(credentials, limits, transport, mapper, clock);
+        this.scopeMetadata = new JiraScopeMetadata(credentials, limits, transport, mapper, clock);
     }
 
     @Override
@@ -163,6 +171,58 @@ public final class JiraAdapter implements TicketProviderAdapter, TicketNavigatio
         return new VersionMemberships(members);
     }
 
+    @Override public ScopedSnapshot readScoped(ProviderInput input, Scope scope, TicketRequestGate gate, Access access) {
+        JiraScope.require(scope);
+        if (!limits.enabled()) throw new TicketException(Code.DISABLED, JiraMessages.format("ticketing.jiraAdapter.ticketing.access.is.disabled"));
+        if (input.projects().size() != 1) throw invalidConfiguration();
+        validateQueries(input.projects()); gate.check();
+        var read = new Read(credentials.connection(input.source(), access), gate, scope);
+        var result = new ProviderSnapshot(List.of(read.project(input.projects().getFirst())));
+        gate.check();
+        if (!current(input.source(), access, false)) throw invalidConfiguration();
+        return new ScopedSnapshot(scope, result);
+    }
+    @Override public ScopedMemberships readVersionMembershipsScoped(InstanceSource source, ProjectQuery query, Scope scope,
+            Access access, TicketRequestGate gate, Function<List<VersionObservation>, Set<String>> select,
+            int maximumVersions, int maximumIssues) {
+        JiraScope.require(scope); validateQueries(List.of(query)); gate.check();
+        if (!limits.enabled()) throw new TicketException(Code.DISABLED, JiraMessages.format("ticketing.jiraAdapter.ticketing.access.is.disabled"));
+        var read = new Read(credentials.connection(source, access), gate, scope);
+        var versions = read.versions("/project/" + query.externalProjectId(), query.externalProjectId());
+        var selected = Set.copyOf(select.apply(versions));
+        if (selected.size() > maximumVersions) throw limitExceeded();
+        if (!versions.stream().map(VersionObservation::externalVersionId).collect(Collectors.toSet()).containsAll(selected)) throw invalidConfiguration();
+        var members = new LinkedHashMap<String, List<IssueObservation>>();
+        var unique = new Issues();
+        var memberships = new HashMap<IssueIdentity, Set<String>>();
+        int remaining = Math.min(maximumIssues, limits.maxReleaseIssues());
+        for (var id : selected.stream().sorted().toList()) {
+            var issues = read.search(query.externalProjectId(), "fixVersion = " + id, id, remaining);
+            remaining -= issues.size();
+            for (var issue : issues) {
+                unique.add(issue, true);
+                memberships.computeIfAbsent(issue.identity(), ignored -> new HashSet<>()).add(id);
+            }
+            members.put(id, issues);
+        }
+        for (var issues : members.values()) for (var issue : issues) {
+            var expected = issue.releaseVersionIds().stream().filter(selected::contains).collect(Collectors.toSet());
+            if (!expected.equals(memberships.get(issue.identity()))) throw invalidResponse();
+        }
+        gate.check();
+        if (!current(source, access, false)) throw invalidConfiguration();
+        return new ScopedMemberships(scope, new VersionMemberships(members));
+    }
+    @Override public Fields fields(InstanceSource source, String project, Access access, TicketRequestGate gate) {
+        return scopeMetadata.fields(source, project, access, gate);
+    }
+    @Override public Values values(InstanceSource source, String project, String field, Access access, TicketRequestGate gate) {
+        return scopeMetadata.values(source, project, field, access, gate);
+    }
+    @Override public CapabilityInspection validateScope(InstanceSource source, String project, Scope scope, Access access, TicketRequestGate gate) {
+        return scopeMetadata.validate(source, project, scope, access, gate);
+    }
+
     private void validateQueries(List<ProjectQuery> projects) {
         if (projects.size() > limits.maxBindings()) {
             throw limitExceeded();
@@ -194,10 +254,17 @@ public final class JiraAdapter implements TicketProviderAdapter, TicketNavigatio
         private final JiraConnection connection;
         private final TicketRequestGate gate;
         private final String authorization;
+        private final Scope scope;
+        private Set<String> eligibleVersions = Set.of();
         private int remainingReleaseIssues = limits.maxReleaseIssues();
         private int remainingAssignedIssues = limits.maxAssignedIssues();
 
         private Read(JiraConnection connection, TicketRequestGate gate) {
+            this(connection, gate, null);
+        }
+
+        private Read(JiraConnection connection, TicketRequestGate gate, Scope scope) {
+            this.scope = scope;
             this.connection = connection;
             this.gate = gate;
             this.authorization = connection.authorization();
@@ -245,8 +312,8 @@ public final class JiraAdapter implements TicketProviderAdapter, TicketNavigatio
             var versions = new ArrayList<VersionObservation>();
             var ids = new HashSet<String>();
             Integer expectedTotal = null;
+            int startAt = 0;
             for (int page = 0; page < limits.maxPages(); page++) {
-                int startAt = versions.size();
                 JsonNode root = request(projectPath + "/version?startAt=" + startAt + "&maxResults=" + PAGE_SIZE, null);
                 JsonNode rows = JiraPayload.array(root, "values", PAGE_SIZE);
                 Integer reportedStart = JiraPayload.offset(root, "startAt");
@@ -279,9 +346,12 @@ public final class JiraAdapter implements TicketProviderAdapter, TicketNavigatio
                     if (!ids.add(version.externalVersionId())) {
                         throw invalidResponse();
                     }
-                    versions.add(version);
+                    version = JiraScope.version(version, scope);
+                    if (version != null) versions.add(version);
                 }
+                startAt = nextOffset;
                 if (last) {
+                    eligibleVersions = versions.stream().map(VersionObservation::externalVersionId).collect(Collectors.toSet());
                     return List.copyOf(versions);
                 }
             }
@@ -293,7 +363,7 @@ public final class JiraAdapter implements TicketProviderAdapter, TicketNavigatio
             if (name == null) {
                 return new ReleaseMembership(ReleaseMappingState.NOT_REQUESTED, null, List.of(), null);
             }
-            var matches = versions.stream().filter(version -> version.name().equals(name)).limit(2).toList();
+            var matches = versions.stream().filter(version -> version.canonicalName().equals(name)).limit(2).toList();
             if (matches.size() != 1) {
                 var state = matches.isEmpty() ? ReleaseMappingState.NOT_FOUND : ReleaseMappingState.AMBIGUOUS;
                 return new ReleaseMembership(state, null, List.of(), clock.instant());
@@ -310,7 +380,7 @@ public final class JiraAdapter implements TicketProviderAdapter, TicketNavigatio
         }
 
         private List<IssueObservation> search(String projectId, String predicate, String versionId, int maximumIssues) {
-            String jql = "project = " + projectId + " AND " + predicate + " ORDER BY key ASC";
+            String jql = "project = " + projectId + " AND " + (scope == null ? predicate : JiraScope.predicate(scope) + " AND (" + predicate + ")") + " ORDER BY key ASC";
             var results = new Issues();
             var tokens = new HashSet<String>();
             String token = null;
@@ -319,7 +389,7 @@ public final class JiraAdapter implements TicketProviderAdapter, TicketNavigatio
                 int pageSize = Math.min(PAGE_SIZE, maximumIssues - count + 1);
                 var body = new LinkedHashMap<String, Object>();
                 body.put("jql", jql);
-                body.put("fields", ISSUE_FIELDS);
+                body.put("fields", JiraScope.fields(ISSUE_FIELDS, scope));
                 body.put("maxResults", pageSize);
                 if (token != null) {
                     body.put("nextPageToken", token);
@@ -333,7 +403,9 @@ public final class JiraAdapter implements TicketProviderAdapter, TicketNavigatio
                 gate.acceptedObjects(rows.size());
                 Instant observedAt = clock.instant();
                 for (JsonNode row : rows) {
+                    if (!JiraScope.matches(row, scope)) continue;
                     IssueObservation issue = JiraPayload.issue(row, projectId, connection, observedAt);
+                    if (scope != null) issue = JiraScope.issue(issue, eligibleVersions);
                     if (versionId != null && !issue.releaseVersionIds().contains(versionId)) {
                         throw invalidResponse();
                     }
@@ -407,5 +479,26 @@ public final class JiraAdapter implements TicketProviderAdapter, TicketNavigatio
     }
     @Override public TicketContent content(BrowserRequest request, TicketRef ticket, Access access, TicketRequestGate gate) {
         return browser.content(request, ticket, access, gate);
+    }
+    @Override public BrowseDescriptor describeScoped(BrowserRequest request, Scope scope, Access access, TicketRequestGate gate) {
+        JiraScope.require(scope);
+        return browser.describe(request, scope, access, gate);
+    }
+    @Override public TicketPage listScoped(BrowserRequest request, Scope scope, BrowseQuery query, Access access, TicketRequestGate gate) {
+        JiraScope.require(scope);
+        return browser.list(request, scope, query, access, gate);
+    }
+    @Override public TicketDetail detailScoped(BrowserRequest request, Scope scope, TicketRef ticket, Access access, TicketRequestGate gate) {
+        JiraScope.require(scope);
+        return browser.detail(request, scope, ticket, access, gate);
+    }
+    @Override public TicketContent contentScoped(BrowserRequest request, Scope scope, TicketRef ticket, Access access, TicketRequestGate gate) {
+        JiraScope.require(scope);
+        return browser.content(request, scope, ticket, access, gate);
+    }
+    @Override public Navigation navigateScoped(BrowserRequest request, Scope scope, TicketRef ticket, Access access, TicketRequestGate gate) {
+        JiraScope.require(scope);
+        if (ticket != null) return browser.detail(request, scope, ticket, access, gate).navigation();
+        browser.describe(request, scope, access, gate); return navigate(request, ticket, access, gate);
     }
 }

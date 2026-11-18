@@ -32,9 +32,9 @@ Packaging requires a clean committed adapter checkout and records both source an
 
 ## Install or replace
 
-This is an ordinary library JAR, not an executable Spring Boot application. A compatible GivOps host supplies Java 25, Spring Boot 4.0.9, Jackson 3 and SDK API **0.4**. Before 1.0, a different SDK minor version is incompatible. Spring Boot discovers the adapter through `AutoConfiguration.imports`, outside the application's component scan; the host supplies credentials, signing, limits, clock and JSON services.
+This is an ordinary library JAR, not an executable Spring Boot application. A compatible GivOps host supplies Java 25, Spring Boot 4.0.9, Jackson 3 and SDK API **0.5**. Before 1.0, a different SDK minor version is incompatible. Spring Boot discovers the adapter through `AutoConfiguration.imports`, outside the application's component scan; the host supplies credentials, signing, limits, clock and JSON services.
 
-Download and extract a release ZIP, or use `target/adapter-jira-0.4.0-SNAPSHOT.jar` after building. Put exactly one Jira adapter JAR in the host's `/opt/givops/adapters` directory. A read-only directory bind mount replaces the complete bundled adapter set, so include every provider you intend to retain. Replace the prior Jira JAR, then restart the same core image. Do not keep two versions together. The host rejects duplicate provider/artifact registrations and incompatible SDK metadata before use. No core rebuild or live reload is required.
+Download and extract a release ZIP, or use `target/adapter-jira-0.5.0-SNAPSHOT.jar` after building. Put exactly one Jira adapter JAR in the host's `/opt/givops/adapters` directory. A read-only directory bind mount replaces the complete bundled adapter set, so include every provider you intend to retain. Replace the prior Jira JAR, then restart the same core image. Do not keep two versions together. The host rejects duplicate provider/artifact registrations and incompatible SDK metadata before use. No core rebuild or live reload is required.
 
 ## Credentials and API compatibility
 
@@ -44,16 +44,17 @@ The API profile is `jira-cloud-rest-v3`. No `serverInfo` request is required. In
 
 English display messages are owned by this artifact at `io/givops/adapters/jira/i18n/en.yml` and formatted through the SDK's MF1 engine. Provider queries, URLs, identifiers and protocol payload values remain code constants.
 
-### SDK API 0.4 compatibility
+### SDK API 0.5 compatibility
 
-This source requires the exact public SDK API 0.4 and artifact version
-0.4.0-SNAPSHOT. Observation acquisition is metadata-only: issue descriptions and
+This source requires the exact public SDK API 0.5 and artifact version
+0.5.0-SNAPSHOT. Observation acquisition is metadata-only: issue descriptions and
 comments are not mapped. Existing creation/write descriptions retain their existing behavior. The adapter registers `ticketing.browse` and `ticketing.content`;
 assets remain unavailable. The `ticketing.navigation` capability supplies provider-owned project
 space links without a content fetch. A global ticket ID does not imply a local
 issue number, so an unknown ticket link remains absent.
 
-The SDK source pin selects merged API 0.4 commit `762b642cedc1b82bb4915af56313e6e3c194a04f`.
+The SDK source pin selects merged API 0.5 commit
+`8226eab4967b8482327ad3cbc4b20c4e92a33ed1`.
 Run `./scripts/verify.sh` to build and verify against that exact public SDK.
 The artifact remains a development snapshot; a source pin does not imply a tagged release.
 
@@ -102,6 +103,23 @@ The browser HTTP tests use synthetic local TLS fixtures and require no live Jira
 credentials. They cover query construction, scoped cursors, identity checks,
 credential invalidation, cancellation and content conversion/resource limits.
 
+### Shared repository scopes
+
+The optional `ticketing.repository-scope` capability supports Components and native
+Jira single-select/multi-select custom fields. Configuration discovery returns
+stable IDs and explicit availability states. Custom option activation verifies a
+single applicable project context covering all issue types; ambiguous or restricted
+contexts remain unavailable. Disabled/deleted options cannot activate a binding.
+Jira administration permission may be required for custom-field setup; ordinary
+scoped reads use the validated configuration without repeating administration APIs.
+
+Each read combines project, selected value and operation predicates, then checks
+returned ID membership. Multi-valued issues can belong to both selected bindings.
+Direct detail/content also request and check the partition field. Browser revisions
+and continuations include the complete binding scope. Exact version prefixes retain
+native IDs/names and expose separate canonical names; pagination advances by raw
+provider rows. Ordinary report acquisition keeps module attribution independent of
+report routing and report-field mappings.
 ## Explicit provisioning
 
 The generic `TicketWriteAdapter` requires a project key, display name, explicit
@@ -139,3 +157,8 @@ This prevents the authenticated user's display language from changing TASK into
 an unmatched translated name. Explicit `providerType` names keep their native
 locale, duplicate matches fail, and ordinary issue observations retain native
 status/type names. These metadata headers do not change any Jira user settings.
+
+Typed issue-version selectors keep their provisioning semantics: NAME is the exact
+native Jira version name and EXTERNAL_ID is the stable native ID. For shared
+bindings, the host maps canonical names using the admitted prefix before calling
+`TicketWriteAdapter`; the adapter neither prefixes IDs nor repeats that mapping.

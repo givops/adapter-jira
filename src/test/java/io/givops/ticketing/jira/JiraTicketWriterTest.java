@@ -86,6 +86,27 @@ class JiraTicketWriterTest {
         assertThat(f.body(4).path("fields").path("fixVersions").get(0).path("id").asText()).isEqualTo("55");
         assertThat(f.requests).extracting(HttpRequest::method).containsExactly("GET","GET","GET","GET","POST","GET","GET","POST","GET");
     }
+    @Test void typedSelectorsKeepNumericNamesDistinctFromNativeIds() {
+        var f=new Fixture(new Reply(200,PROJECT),new Reply(200,TYPES),
+                new Reply(200,"{\"startAt\":0,\"total\":2,\"values\":[{\"id\":\"55\",\"name\":\"Back 1.2\"},{\"id\":\"77\",\"name\":\"55\"}]}"),
+                new Reply(200,FIELDS),new Reply(201,"{\"id\":\"900\",\"key\":\"EX-1\"}"),new Reply(200,issue("new")));
+        var command=new CreateIssueCommand("Work",null,IssueKind.TASK,null,WorkflowState.OPEN,null,null,null,List.of(),false,null,
+                List.of(new VersionSelector(VersionSelectorKind.NAME,"55"),new VersionSelector(VersionSelectorKind.EXTERNAL_ID,"55"),
+                        new VersionSelector(VersionSelectorKind.NAME,"Back 1.2")));
+        f.writer().createIssue(f.source,project(f),command,f.access,new Gate());
+        assertThat(f.body(4).path("fields").path("fixVersions")).extracting(v -> v.path("id").asText())
+                .containsExactly("77","55","55");
+        assertThat(f.requests).extracting(HttpRequest::method).containsExactly("GET","GET","GET","GET","POST","GET");
+    }
+    @Test void createsVersionWithExactHostMappedPrefixAndSpaces() {
+        String nativeName=" Back 1.2 ";
+        String version=VERSION.replace("1.2",nativeName);
+        var f=new Fixture(new Reply(200,PROJECT),new Reply(201,version),new Reply(200,version));
+        var actual=f.writer().createVersion(f.source,project(f),new CreateVersionCommand(nativeName,false,false,null),f.access,new Gate());
+        assertThat(f.body(1).path("name").asText()).isEqualTo(nativeName);
+        assertThat(actual.name()).isEqualTo(nativeName);
+        assertThat(actual.canonicalName()).isEqualTo(nativeName);
+    }
     @Test void portableTypeMetadataForcesEnglishWithoutChangingNativeObservations() {
         var f=doneFixture(204);
         f.writer().createIssue(f.source,project(f),command(WorkflowState.DONE),f.access,new Gate());

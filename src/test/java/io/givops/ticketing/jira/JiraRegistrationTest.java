@@ -44,14 +44,18 @@ class JiraRegistrationTest {
                             .hasSingleBean(TicketProviderAdapter.class).hasSingleBean(TestReportProviderAdapter.class)
                             .hasSingleBean(io.givops.ticketing.port.TicketBrowseAdapter.class)
                             .hasSingleBean(io.givops.ticketing.port.TicketContentAdapter.class)
+                            .hasSingleBean(io.givops.ticketing.port.TicketRepositoryScopeAdapter.class)
+                            .hasSingleBean(io.givops.ticketing.port.TicketScopedProviderAdapter.class)
+                            .hasSingleBean(io.givops.ticketing.port.TicketScopedBrowseAdapter.class)
+                            .hasSingleBean(io.givops.testreports.port.TicketScopedReportAdapter.class)
                             .hasSingleBean(ReleaseWriteAdapter.class).hasSingleBean(TicketWriteAdapter.class);
                     var definition = context.getBean(TicketProviderDefinition.class);
                     AdapterTestkit.verifyDefinition(definition);
-                    assertThat(definition.sdkApiVersion()).isEqualTo("0.4");
-                    assertThat(definition.capabilities()).containsExactly("ticketing.project-create", "ticketing.version-create", "ticketing.issue-create", "ticketing.read", "ticketing.browse", "ticketing.content", "ticketing.navigation", "ticketing.version-membership",
+                    assertThat(definition.sdkApiVersion()).isEqualTo("0.5");
+                    assertThat(definition.capabilities()).containsExactly("ticketing.repository-scope", "ticketing.project-create", "ticketing.version-create", "ticketing.issue-create", "ticketing.read", "ticketing.browse", "ticketing.content", "ticketing.navigation", "ticketing.version-membership",
                             "ticketing.reports", "ticketing.release-write");
                     assertThat(definition.apiProfiles()).containsExactly("jira-cloud-rest-v3");
-                    assertThat(definition.adapterVersion()).isEqualTo("0.4.0-SNAPSHOT");
+                    assertThat(definition.adapterVersion()).isEqualTo("0.5.0-SNAPSHOT");
                     assertThat(captures).hasValue(0);
                 });
     }

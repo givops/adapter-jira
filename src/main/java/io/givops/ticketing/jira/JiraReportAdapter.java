@@ -51,8 +51,12 @@ import tools.jackson.databind.ObjectReader;
 import tools.jackson.databind.ObjectWriter;
 import tools.jackson.databind.json.JsonMapper;
 
+import io.givops.ticketing.model.TicketScopeModels.Scope;
+import io.givops.ticketing.model.TicketScopeModels.ScopedOrdinaryDataset;
+import io.givops.testreports.port.TicketScopedReportAdapter;
+
 /** Jira Cloud read operations for independently configured test report datasets. */
-public final class JiraReportAdapter implements TestReportProviderAdapter {
+public final class JiraReportAdapter implements TestReportProviderAdapter, TicketScopedReportAdapter {
     private static final int PAGE_SIZE = 100;
     private static final int HISTORY_BATCH = 1000;
     private static final int MAX_TOKEN_LENGTH = 8192;
@@ -115,8 +119,21 @@ public final class JiraReportAdapter implements TestReportProviderAdapter {
     }
 
     @Override public OrdinaryDataset ordinaryVersions(ReportInput input, Access access, TicketRequestGate gate) {
+        if (input.ordinaryProjects().stream().anyMatch(project -> project.scope() != null)) throw JiraConnection.invalidConfiguration();
         var session = session(input, access, gate);
         return session.ordinary();
+    }
+
+    @Override public ScopedOrdinaryDataset ordinaryVersionsScoped(ReportInput input, Scope scope, Access access, TicketRequestGate gate) {
+        JiraScope.require(scope); validate(input); gate.check();
+        if (input.ordinaryProjects().size() != 1) throw JiraConnection.invalidConfiguration();
+        var project = input.ordinaryProjects().getFirst();
+        if (!scope.bindingId().equals(project.projectId()) || project.scope() != null && !scope.equals(project.scope()))
+            throw JiraConnection.invalidConfiguration();
+        var session = new Session(input, credentials.connection(input.source(), access), gate, scope);
+        var result = session.ordinary(); gate.check();
+        if (!current(input.source(), access, false)) throw JiraConnection.invalidConfiguration();
+        return new ScopedOrdinaryDataset(scope, project.projectId(), result);
     }
 
     private Session session(ReportInput input, Access captured, TicketRequestGate gate) {
@@ -132,8 +149,13 @@ public final class JiraReportAdapter implements TestReportProviderAdapter {
         private final TicketRequestGate gate;
         private final Map<String, SourceProject> sources = new LinkedHashMap<>();
         private final List<String> fields;
+        private final Scope scope;
 
         Session(ReportInput input, JiraConnection connection, TicketRequestGate gate) {
+            this(input, connection, gate, null);
+        }
+        Session(ReportInput input, JiraConnection connection, TicketRequestGate gate, Scope scope) {
+            this.scope = scope;
             this.input = input;
             this.connection = connection;
             this.gate = gate;
@@ -143,7 +165,7 @@ public final class JiraReportAdapter implements TestReportProviderAdapter {
             requested.add(input.mapping().targetProject().fieldId());
             requested.add(input.mapping().versions().fieldId());
             if (input.mapping().family() != null) requested.add(input.mapping().family().fieldId());
-            fields = List.copyOf(requested);
+            fields = JiraScope.fields(List.copyOf(requested), scope);
         }
 
         String reportPredicate() {
@@ -357,10 +379,11 @@ public final class JiraReportAdapter implements TestReportProviderAdapter {
                 List<OrdinaryVersion> projectVersions = versions(externalProject, ticketProject);
                 versions.addAll(projectVersions);
                 knownVersions.put(ticketProject, projectVersions.stream().map(OrdinaryVersion::externalVersionId).collect(Collectors.toSet()));
-                if (!projectVersions.isEmpty()) {
-                    var projectIssues = search("project = " + externalProject + " AND fixVersion IS NOT EMPTY",
+                if (scope != null || !projectVersions.isEmpty()) {
+                    var projectIssues = search("project = " + externalProject + (scope == null ? " AND fixVersion IS NOT EMPTY" : " AND " + JiraScope.predicate(scope)),
                             limits.maxOrdinaryIssues() - issues.size(), false);
                     projectIssues.forEach((id, row) -> {
+                        if (!JiraScope.matches(row, scope)) return;
                         JsonNode values = row.get("fields");
                         JiraPayload.requireObject(values);
                         if (!externalProject.equals(JiraReportPayload.identifier(values.get("project"), "id"))) {
@@ -380,8 +403,10 @@ public final class JiraReportAdapter implements TestReportProviderAdapter {
                 UUID ticketProject = projects.get(externalProject);
                 if (ticketProject == null) throw invalidResponse();
                 var versionValues = JiraReportPayload.extract(fields, new FieldRef("fixVersions", Extractor.VERSION_IDS), ticketProject);
-                var memberIds = versionValues.versions().stream().map(version -> version.externalVersionId()).toList();
-                if (versionValues.state() != FieldState.PRESENT || !knownVersions.get(ticketProject).containsAll(memberIds)) throw invalidResponse();
+                var memberIds = versionValues.versions().stream().map(version -> version.externalVersionId())
+                        .filter(idValue -> scope == null || knownVersions.get(ticketProject).contains(idValue)).toList();
+                if ((versionValues.state() != FieldState.PRESENT && (scope == null || versionValues.state() != FieldState.MISSING))
+                        || !knownVersions.get(ticketProject).containsAll(memberIds)) throw invalidResponse();
                 var family = JiraReportPayload.extract(fields, input.mapping().family(), ticketProject);
                 JsonNode status = fields.get("status");
                 var category = status == null ? null : status.get("statusCategory");
@@ -399,6 +424,7 @@ public final class JiraReportAdapter implements TestReportProviderAdapter {
 
         List<OrdinaryVersion> versions(String projectId, UUID ticketProject) {
             var versions = new LinkedHashMap<String, OrdinaryVersion>();
+            var rawIds = new HashSet<String>();
             int start = 0;
             Integer total = null;
             for (int page = 0; page < limits.maxPages(); page++) {
@@ -416,8 +442,11 @@ public final class JiraReportAdapter implements TestReportProviderAdapter {
                 gate.acceptedObjects(values.size());
                 for (JsonNode value : values) {
                     var version = JiraPayload.version(value, projectId, clock.instant());
+                    if (!rawIds.add(version.externalVersionId())) throw invalidResponse();
+                    version = JiraScope.version(version, scope);
+                    if (version == null) continue;
                     var converted = new OrdinaryVersion(ticketProject, version.externalVersionId(), version.name(),
-                            version.released(), version.archived(), version.releaseDate());
+                            version.released(), version.archived(), version.releaseDate(), version.canonicalName());
                     if (versions.putIfAbsent(converted.externalVersionId(), converted) != null) throw invalidResponse();
                 }
                 if (last) return List.copyOf(versions.values());

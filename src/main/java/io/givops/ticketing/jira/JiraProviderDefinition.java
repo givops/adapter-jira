@@ -26,10 +26,10 @@ public final class JiraProviderDefinition implements TicketProviderDefinition {
     @Override public String displayName() { return JiraMessages.format("jira.definition.name"); }
     @Override public String adapterId() { return "io.givops.adapter-jira"; }
     @Override public String adapterVersion() { return Artifact.VERSION; }
-    @Override public String sdkApiVersion() { return "0.4"; }
+    @Override public String sdkApiVersion() { return "0.5"; }
     @Override public Map<String, String> commandLabels() { return Map.of("projectOwner", "Project lead account ID"); }
     @Override public List<String> capabilities() {
-        return List.of("ticketing.project-create", "ticketing.version-create", "ticketing.issue-create", "ticketing.read", "ticketing.browse", "ticketing.content", "ticketing.navigation", "ticketing.version-membership", "ticketing.reports", "ticketing.release-write");
+        return List.of("ticketing.repository-scope", "ticketing.project-create", "ticketing.version-create", "ticketing.issue-create", "ticketing.read", "ticketing.browse", "ticketing.content", "ticketing.navigation", "ticketing.version-membership", "ticketing.reports", "ticketing.release-write");
     }
     @Override public List<String> apiProfiles() { return List.of("jira-cloud-rest-v3"); }
     @Override public List<CredentialField> credentialFields() {
