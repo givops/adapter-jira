@@ -6,6 +6,6 @@ Keep changes focused and add tests for changed behavior. Provider HTTP tests mus
 
 Put user-facing English messages in the artifact's YAML catalog and use `JiraMessages`; keep API keys, JQL and other protocol values untranslated. Do not depend on private host implementations. Propose public contract changes in the SDK before using them here, and update the full commit in `sdk.ref` only after the SDK revision is reviewed and available publicly.
 
-Run full verification on the final source. Include the behavior change, relevant test results and any compatibility implications in pull requests. CI verifies the pinned SDK and adapter, then packages the JAR, license and commit/checksum metadata. Release publication is maintained by repository owners; local verification does not publish anything.
+Run full verification on the final source. Include the behavior change, relevant test results and any compatibility implications in pull requests. Run `./scripts/verify-local.sh` before merging to verify the pinned SDK and adapter, test packaging, and package the JAR with license and commit/checksum metadata on a clean commit. Release publication is maintained by repository owners; local verification does not publish anything.
 
 Contributions are licensed under the repository's Apache 2.0 license.

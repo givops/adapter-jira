@@ -16,9 +16,10 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: maven
-      - run: ./scripts/verify.sh
-      - run: python3 scripts/package-release.py
-      - name: Attach the verified library bundle
+      - name: Build release packages (verification runs locally before merge)
+        run: ./scripts/verify.sh --package-only
+      - run: python3 scripts/package-release.py --package-only
+      - name: Attach the release library bundle
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}

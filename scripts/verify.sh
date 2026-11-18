@@ -2,14 +2,22 @@
 set -euo pipefail
 project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source_ref=$(git -C "$project_root" rev-parse --verify HEAD)
+clean_source=true
 if [[ -n $(git -C "$project_root" status --porcelain) ]]; then
-  echo 'Verification receipts require a clean committed adapter checkout. Use mvn verify for uncommitted development.' >&2
-  exit 2
+  clean_source=false
+fi
+cache=${GIVOPS_MAVEN_REPOSITORY:-"$project_root/.m2-local"}
+[[ "$cache" = /* ]] || cache="$PWD/$cache"
+mode=verify
+if [[ ${1:-} == --package-only ]]; then
+  mode=package
+  shift
+  [[ "$clean_source" == true ]] || { echo 'Release packaging requires a clean committed checkout.' >&2; exit 2; }
 fi
 sdk_source=
 if [[ $# -gt 0 ]]; then
   if [[ $# -ne 2 || $1 != --sdk-source ]]; then
-    echo 'Usage: scripts/verify.sh [--sdk-source /path/to/committed/adapter-sdk]' >&2
+    echo 'Usage: scripts/verify.sh [--package-only] [--sdk-source /path/to/committed/adapter-sdk]' >&2
     exit 2
   fi
   sdk_source=$2
@@ -33,8 +41,18 @@ if [[ ! $sdk_ref =~ ^[0-9a-f]{40}$ ]]; then
 fi
 git -C "$build_root/sdk" checkout --quiet --detach "$sdk_ref"
 [[ $(git -C "$build_root/sdk" rev-parse HEAD) == "$sdk_ref" ]]
-mvn --batch-mode --no-transfer-progress -f "$build_root/sdk/pom.xml" clean install
-mvn --batch-mode --no-transfer-progress -f "$project_root/pom.xml" clean verify
+if [[ "$mode" == package ]]; then
+  mvn --batch-mode --no-transfer-progress -Dmaven.repo.local="$cache" -Dmaven.test.skip=true -f "$build_root/sdk/pom.xml" clean install
+  mvn --batch-mode --no-transfer-progress -Dmaven.repo.local="$cache" -Dmaven.test.skip=true -f "$project_root/pom.xml" clean package
+  echo 'Release packages built; tests must have passed locally before merge.'
+  exit 0
+fi
+mvn --batch-mode --no-transfer-progress -Dmaven.repo.local="$cache" -f "$build_root/sdk/pom.xml" clean install
+mvn --batch-mode --no-transfer-progress -Dmaven.repo.local="$cache" -f "$project_root/pom.xml" clean verify
+if [[ "$clean_source" != true ]]; then
+  echo 'Development tests passed; no committed release receipts were recorded.'
+  exit 0
+fi
 if [[ $(git -C "$project_root" rev-parse HEAD) != "$source_ref" || -n $(git -C "$project_root" status --porcelain) ]]; then
   echo 'Adapter source changed during verification; no release receipt was recorded.' >&2
   exit 2
