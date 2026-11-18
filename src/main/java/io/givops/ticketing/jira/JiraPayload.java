@@ -126,7 +126,7 @@ final class JiraPayload {
         return new TicketException(Code.INVALID_RESPONSE, JiraMessages.format("ticketing.jiraPayload.jira.cloud.returned.an.invalid.or.out.of.scope"));
     }
 
-    private static String id(JsonNode node, String name) {
+    static String id(JsonNode node, String name) {
         JsonNode field = node.get(name);
         if (field != null && (field.isString() || field.isIntegralNumber())) {
             String value = field.isString() ? field.stringValue() : field.toString();

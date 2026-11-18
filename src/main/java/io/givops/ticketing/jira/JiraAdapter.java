@@ -22,7 +22,7 @@ import io.givops.ticketing.model.TicketModels.ReleaseMappingState;
 import io.givops.ticketing.model.TicketModels.ReleaseMembership;
 import io.givops.ticketing.model.TicketModels.TicketProvider;
 import io.givops.ticketing.model.TicketModels.VersionObservation;
-import io.givops.ticketing.port.TicketProviderAdapter;
+import io.givops.ticketing.port.TicketProjectLookupAdapter;
 import io.givops.ticketing.port.TicketRequestGate;
 import java.time.Clock;
 import java.time.Instant;
@@ -52,7 +52,7 @@ import io.givops.ticketing.port.TicketScopedBrowseAdapter;
 import io.givops.ticketing.port.TicketRepositoryScopeAdapter;
 import io.givops.adapters.CapabilityInspection;
 
-public final class JiraAdapter implements TicketScopedProviderAdapter, TicketScopedBrowseAdapter, TicketRepositoryScopeAdapter, TicketProviderAdapter, TicketNavigationAdapter, TicketBrowseAdapter, TicketContentAdapter {
+public final class JiraAdapter implements TicketScopedProviderAdapter, TicketScopedBrowseAdapter, TicketRepositoryScopeAdapter, TicketProjectLookupAdapter, TicketNavigationAdapter, TicketBrowseAdapter, TicketContentAdapter {
     private static final int PAGE_SIZE = 100;
     private static final int MAX_PAGE_TOKEN_LENGTH = 8192;
     private static final List<String> ISSUE_FIELDS = List.of("project", "summary", "issuetype", "status",
@@ -103,6 +103,31 @@ public final class JiraAdapter implements TicketScopedProviderAdapter, TicketSco
             return true;
         }
         return false;
+    }
+
+    @Override
+    public ProjectIdentity lookupProject(InstanceSource source, String projectKey, Access access, TicketRequestGate gate) {
+        if (!limits.enabled()) {
+            throw new TicketException(Code.DISABLED, JiraMessages.format("ticketing.jiraAdapter.ticketing.access.is.disabled"));
+        }
+        if (projectKey == null || !JiraPayload.PROJECT_KEY.matcher(projectKey).matches()
+                || !(access instanceof JiraAccess.Captured captured)) {
+            throw invalidConfiguration();
+        }
+        gate.check();
+        var connection = credentials.connection(source, captured);
+        credentials.requireCurrent(captured, false);
+        var data = new Read(connection, gate).request("/project/" + projectKey, null);
+        var id = JiraPayload.id(data, "id");
+        var key = JiraPayload.text(data, "key", true);
+        var name = JiraPayload.text(data, "name", true);
+        if (!key.equals(projectKey) || name.length() > 200 || name.chars().anyMatch(Character::isISOControl)) {
+            throw invalidResponse();
+        }
+        gate.acceptedObjects(1);
+        gate.check();
+        credentials.requireCurrent(captured, false);
+        return new ProjectIdentity(id, key, name);
     }
 
     @Override
