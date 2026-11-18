@@ -44,6 +44,7 @@ class JiraRegistrationTest {
                             .hasSingleBean(TicketProviderAdapter.class).hasSingleBean(TestReportProviderAdapter.class)
                             .hasSingleBean(io.givops.ticketing.port.TicketBrowseAdapter.class)
                             .hasSingleBean(io.givops.ticketing.port.TicketContentAdapter.class)
+                            .hasSingleBean(io.givops.ticketing.port.TicketProjectLookupAdapter.class)
                             .hasSingleBean(io.givops.ticketing.port.TicketRepositoryScopeAdapter.class)
                             .hasSingleBean(io.givops.ticketing.port.TicketScopedProviderAdapter.class)
                             .hasSingleBean(io.givops.ticketing.port.TicketScopedBrowseAdapter.class)
@@ -52,7 +53,7 @@ class JiraRegistrationTest {
                     var definition = context.getBean(TicketProviderDefinition.class);
                     AdapterTestkit.verifyDefinition(definition);
                     assertThat(definition.sdkApiVersion()).isEqualTo("0.5");
-                    assertThat(definition.capabilities()).containsExactly("ticketing.repository-scope", "ticketing.project-create", "ticketing.version-create", "ticketing.issue-create", "ticketing.read", "ticketing.browse", "ticketing.content", "ticketing.navigation", "ticketing.version-membership",
+                    assertThat(definition.capabilities()).containsExactly("ticketing.project-lookup", "ticketing.repository-scope", "ticketing.project-create", "ticketing.version-create", "ticketing.issue-create", "ticketing.read", "ticketing.browse", "ticketing.content", "ticketing.navigation", "ticketing.version-membership",
                             "ticketing.reports", "ticketing.release-write");
                     assertThat(definition.apiProfiles()).containsExactly("jira-cloud-rest-v3");
                     assertThat(definition.adapterVersion()).isEqualTo("0.5.0-SNAPSHOT");

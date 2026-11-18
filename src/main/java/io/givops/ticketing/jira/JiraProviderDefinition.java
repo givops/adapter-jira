@@ -6,6 +6,7 @@ import io.givops.adapters.CredentialRequest;
 import io.givops.adapters.RuntimeCredential;
 import io.givops.ticketing.model.TicketModels.TicketProvider;
 import io.givops.ticketing.port.TicketProviderDefinition;
+import io.givops.ticketing.port.TicketProjectLookupAdapter;
 import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,7 +30,7 @@ public final class JiraProviderDefinition implements TicketProviderDefinition {
     @Override public String sdkApiVersion() { return "0.5"; }
     @Override public Map<String, String> commandLabels() { return Map.of("projectOwner", "Project lead account ID"); }
     @Override public List<String> capabilities() {
-        return List.of("ticketing.repository-scope", "ticketing.project-create", "ticketing.version-create", "ticketing.issue-create", "ticketing.read", "ticketing.browse", "ticketing.content", "ticketing.navigation", "ticketing.version-membership", "ticketing.reports", "ticketing.release-write");
+        return List.of(TicketProjectLookupAdapter.CAPABILITY, "ticketing.repository-scope", "ticketing.project-create", "ticketing.version-create", "ticketing.issue-create", "ticketing.read", "ticketing.browse", "ticketing.content", "ticketing.navigation", "ticketing.version-membership", "ticketing.reports", "ticketing.release-write");
     }
     @Override public List<String> apiProfiles() { return List.of("jira-cloud-rest-v3"); }
     @Override public List<CredentialField> credentialFields() {

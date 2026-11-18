@@ -74,6 +74,35 @@ class JiraAdapterTest {
             {"isLast":true,"issues":[]}
             """;
 
+    @Test void looksUpProjectIdentityUsingTheRoutingKey() {
+        var fixture = new Fixture(new Reply("""
+                {"id":"10038","key":"MUL","name":"Synthetic project","uuid":"different-identifier"}
+                """));
+        var adapter = fixture.adapter(settings(null), LIMITS);
+        var gate = new Gate();
+        var result = adapter.lookupProject(SOURCE, "MUL", adapter.captureAccess(SOURCE), gate);
+        assertThat(result.externalProjectId()).isEqualTo("10038");
+        assertThat(result.projectKey()).isEqualTo("MUL");
+        assertThat(result.displayName()).isEqualTo("Synthetic project");
+        assertThat(gate.objects).isEqualTo(1);
+        assertThat(fixture.requests).singleElement().satisfies(request -> {
+            assertThat(request.method()).isEqualTo("GET");
+            assertThat(request.uri()).isEqualTo(SOURCE.baseUrl().resolve("/rest/api/3/project/MUL"));
+        });
+    }
+
+    @Test void projectLookupRejectsInvalidOrMismatchedKeys() {
+        var fixture = new Fixture(new Reply(PROJECT));
+        var adapter = fixture.adapter(settings(null), LIMITS);
+        var access = adapter.captureAccess(SOURCE);
+        assertThatExceptionOfType(TicketException.class)
+                .isThrownBy(() -> adapter.lookupProject(SOURCE, "invalid/key", access, new Gate()));
+        assertThat(fixture.requests).isEmpty();
+        assertThatExceptionOfType(TicketException.class)
+                .isThrownBy(() -> adapter.lookupProject(SOURCE, "MUL", access, new Gate()))
+                .extracting(TicketException::code).isEqualTo(Code.INVALID_RESPONSE);
+    }
+
     private static io.givops.ticketing.model.TicketScopeModels.Scope scope() {
         return new io.givops.ticketing.model.TicketScopeModels.Scope(BINDING_ID,
                 new io.givops.ticketing.model.TicketScopeModels.Field("components", "Components",
