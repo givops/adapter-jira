@@ -53,9 +53,11 @@ assets remain unavailable. The `ticketing.navigation` capability supplies provid
 space links without a content fetch. A global ticket ID does not imply a local
 issue number, so an unknown ticket link remains absent.
 
-The SDK source pin selects merged API 0.5 commit
-`8226eab4967b8482327ad3cbc4b20c4e92a33ed1`.
-Run `./scripts/verify.sh` to build and verify against that exact public SDK.
+For project registration, the adapter looks up the project key with
+`GET /rest/api/3/project/{projectKey}` and returns Jira's `id`, `key` and `name`.
+
+Run `./scripts/verify.sh` to build and verify against the exact public API 0.5
+revision in [sdk.ref](sdk.ref).
 The artifact remains a development snapshot; a source pin does not imply a tagged release.
 
 
