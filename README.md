@@ -169,7 +169,8 @@ bindings, the host maps canonical names using the admitted prefix before calling
 Run `./scripts/verify-local.sh` on the final source with Java 25 and Maven 3.9+.
 It builds the public SDK and adapter tests locally; no provider account or private
 repository is required. Record the command and results before merging each PR.
-GitHub Actions is reserved for package releases; verification runs locally.
+Build and test verification runs locally before merging. GitHub Actions runs
+package releases where configured and automatic CodeQL security scans.
 Python 3 is also required. Release ZIP verification requires a clean committed
 checkout; development verification of edited source runs the Java and Python tests
 without creating release receipts. Rerun on the final commit before merging.
