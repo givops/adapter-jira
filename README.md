@@ -22,13 +22,13 @@ For SDK development, use a clean committed public SDK checkout:
 ./scripts/verify.sh --sdk-source /path/to/adapter-sdk
 ```
 
-The override is cloned before building, so its working tree and outputs remain untouched. Once the SDK is installed, `mvn verify` runs the adapter suite directly. Python 3 is needed only to create the downloadable bundle:
+The override is cloned before building, so its working tree and outputs remain untouched. Once the SDK is installed, `mvn -Dmaven.repo.local=.m2-local verify` runs the adapter suite directly. Python 3 is needed only to create the downloadable bundle:
 
 ```sh
 python3 scripts/package-release.py
 ```
 
-Packaging requires a clean committed adapter checkout and records both source and pinned SDK commit identities. Use the pinned default verification before packaging a release. CI follows this order and attaches a ZIP to published GitHub releases. Artifacts are not currently published to Maven Central.
+Packaging requires a clean committed adapter checkout and records both source and pinned SDK commit identities. Use the pinned default verification before packaging a release. Run `scripts/verify-local.sh` on the final commit before merging. The GitHub release workflow rebuilds packages without running tests and attaches a ZIP to published releases; its metadata reports `package-only` rather than claiming local verification. Artifacts are not currently published to Maven Central.
 
 ## Install or replace
 
@@ -162,3 +162,17 @@ Typed issue-version selectors keep their provisioning semantics: NAME is the exa
 native Jira version name and EXTERNAL_ID is the stable native ID. For shared
 bindings, the host maps canonical names using the admitted prefix before calling
 `TicketWriteAdapter`; the adapter neither prefixes IDs nor repeats that mapping.
+
+
+## Local verification before merging
+
+Run `./scripts/verify-local.sh` on the final source with Java 25 and Maven 3.9+.
+It builds the public SDK and adapter tests locally; no provider account or private
+repository is required. Record the command and results before merging each PR.
+Build and test verification runs locally before merging. GitHub Actions runs
+package releases where configured and automatic CodeQL security scans.
+Python 3 is also required. Release ZIP verification requires a clean committed
+checkout; development verification of edited source runs the Java and Python tests
+without creating release receipts. Rerun on the final commit before merging.
+`GIVOPS_MAVEN_REPOSITORY` selects an isolated Maven cache (default `.m2-local/`).
+Do not share a cache between concurrent snapshot builds.
