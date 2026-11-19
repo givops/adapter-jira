@@ -36,6 +36,9 @@ public class JiraReleaseWriter implements ReleaseWriteAdapter {
         public WriteFailure(String code, boolean uncertain, FailureCategory category) {
             super(code, uncertain, JiraMessages.format("ticketing.jiraReleaseWriter.the.jira.operation.could.not.be.confirmed"), category);
         }
+        private WriteFailure(String code, boolean uncertain, String evidence, FailureCategory category) {
+            super(code, uncertain, evidence, category);
+        }
     }
     @Override public TicketProvider provider() { return TicketProvider.JIRA_CLOUD; }
     private static Session owned(ReleaseWriteAdapter.Session session) {
@@ -49,7 +52,7 @@ public class JiraReleaseWriter implements ReleaseWriteAdapter {
     private final TicketProperties limits;
     JiraReleaseWriter(JiraAccess credentials, JiraTransport reads, JsonMapper mapper, TicketProperties limits) {
         this(credentials, reads, new JiraWriteTransport(JiraTransport.clientBuilder(limits.requestTimeout()).build(),
-                limits.maxResponseBytes()), mapper, limits);
+                limits.maxResponseBytes(), reads.connectionClients()), mapper, limits);
     }
     JiraReleaseWriter(JiraAccess credentials, JiraTransport reads, JiraWriteTransport writes, JsonMapper mapper, TicketProperties limits) {
         this.credentials = credentials; this.reads = reads; this.writes = writes; this.mapper = mapper; this.limits = limits;
@@ -205,7 +208,7 @@ public class JiraReleaseWriter implements ReleaseWriteAdapter {
                 case "release_jira_timeout", "release_jira_interrupted" -> FailureCategory.TRANSIENT;
                 default -> FailureCategory.UNKNOWN;
             };
-            throw new WriteFailure(failure.code(), failure.uncertain(), category);
+            throw new WriteFailure(failure.code(), failure.uncertain(), failure.getMessage(), category);
         }
         if (response.status() != 201) {
             int status = response.status();
@@ -221,7 +224,7 @@ public class JiraReleaseWriter implements ReleaseWriteAdapter {
                 case 408, 429 -> FailureCategory.TRANSIENT;
                 default -> status >= 500 ? FailureCategory.TRANSIENT : FailureCategory.INVALID_REQUEST;
             };
-            throw new WriteFailure(code, status == 408 || status >= 500, category);
+            throw new WriteFailure(code, status == 408 || status >= 500, response.evidence(), category);
         }
         try {
             var result = mapper.readTree(response.body());

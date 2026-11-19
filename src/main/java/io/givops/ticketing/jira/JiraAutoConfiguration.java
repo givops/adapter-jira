@@ -1,6 +1,8 @@
 package io.givops.ticketing.jira;
 
 import io.givops.adapters.ContextSigner;
+import io.givops.adapters.ConnectionClients;
+import org.springframework.beans.factory.ObjectProvider;
 import io.givops.adapters.CredentialHost;
 import io.givops.testreports.config.TestReportProperties;
 import io.givops.ticketing.config.TicketProperties;
@@ -20,8 +22,8 @@ public class JiraAutoConfiguration {
     @Bean JiraAccess jiraAccess(CredentialHost host, ContextSigner signer) {
         return new JiraAccess(host, signer);
     }
-    @Bean JiraTransport jiraTransport(TicketProperties limits, Clock clock) {
-        return new JiraTransport(JiraTransport.clientBuilder(limits.requestTimeout()).build(), limits.maxResponseBytes(), clock);
+    @Bean JiraTransport jiraTransport(TicketProperties limits, Clock clock, ObjectProvider<ConnectionClients> clients) {
+        return new JiraTransport(JiraTransport.clientBuilder(limits.requestTimeout()).build(), limits.maxResponseBytes(), clock, clients.getIfAvailable(() -> ConnectionClients.SYSTEM));
     }
     @Bean JiraAdapter jiraAdapter(JiraAccess credentials, TicketProperties limits,
                                  JiraTransport transport, JsonMapper mapper, Clock clock) {

@@ -36,7 +36,7 @@ public final class JiraTicketWriter implements TicketWriteAdapter, TicketCapabil
     private final ObjectReader reader;
     private final Clock clock;
     JiraTicketWriter(JiraAccess credentials,JiraTransport reads,TicketProperties limits,JsonMapper mapper,Clock clock) {
-        this(credentials,reads,new JiraWriteTransport(JiraTransport.clientBuilder(limits.requestTimeout()).build(),limits.maxResponseBytes()),limits,mapper,clock);
+        this(credentials,reads,new JiraWriteTransport(JiraTransport.clientBuilder(limits.requestTimeout()).build(),limits.maxResponseBytes(),reads.connectionClients()),limits,mapper,clock);
     }
     JiraTicketWriter(JiraAccess credentials,JiraTransport reads,JiraWriteTransport writes,TicketProperties limits,JsonMapper mapper,Clock clock) {
         this.credentials=credentials;this.reads=reads;this.writes=writes;this.limits=limits;this.mapper=mapper;this.clock=clock;
@@ -156,6 +156,7 @@ public final class JiraTicketWriter implements TicketWriteAdapter, TicketCapabil
                 public void receivedBytes(long bytes){host.receivedBytes(bytes);}
                 public void acceptedObjects(int count){host.acceptedObjects(count);}
                 public void check(){credentials.requireCurrent(captured,false);host.check();}
+                public io.givops.adapters.ConnectionTarget connectionTarget(){return host.connectionTarget();}
                 public Duration remaining(){return host.remaining();}
             };
         }
@@ -164,9 +165,10 @@ public final class JiraTicketWriter implements TicketWriteAdapter, TicketCapabil
             byte[] bytes=mapper.writeValueAsBytes(body);if(bytes.length>65_536) throw JiraTransport.limitExceeded();
             JiraWriteTransport.Response response;
             try {response=writes.post(connection.endpoint(path),connection.authorization(),bytes,gate);}
-            catch(JiraWriteTransport.Failure failure) {throw failure(Code.PROVIDER_ERROR,"jira.provisioning.uncertain");}
+            catch(JiraWriteTransport.Failure failure) {throw new TicketException(Code.PROVIDER_ERROR,
+                    JiraMessages.format("jira.provisioning.uncertain") + " " + failure.getMessage());}
             gate.check();
-            if(response.status()!=expected) throw failure(switch(response.status()) {case 401 -> Code.AUTHENTICATION_FAILED;case 403,404 -> Code.AUTHORIZATION_FAILED;case 429 -> Code.RATE_LIMITED;case 408 -> Code.TIMEOUT;case 400,409,422 -> Code.INVALID_CONFIGURATION;default -> Code.PROVIDER_ERROR;},"jira.provisioning.rejected");
+            if(response.status()!=expected) throw new TicketException(switch(response.status()) {case 401 -> Code.AUTHENTICATION_FAILED;case 403,404 -> Code.AUTHORIZATION_FAILED;case 429 -> Code.RATE_LIMITED;case 408 -> Code.TIMEOUT;case 400,409,422 -> Code.INVALID_CONFIGURATION;default -> Code.PROVIDER_ERROR;},response.evidence());
             if(expected==204) return mapper.createObjectNode();
             var result=parse(response.body());gate.acceptedObjects(1);return result;
         }

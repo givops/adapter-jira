@@ -188,6 +188,7 @@ final class JiraBrowser {
                 @Override public void check() { gate.check(); credentials.requireCurrent(captured, false); }
                 @Override public void receivedBytes(long count) { gate.receivedBytes(count); credentials.requireCurrent(captured, false); }
                 @Override public void acceptedObjects(int count) { gate.acceptedObjects(count); credentials.requireCurrent(captured, false); }
+                @Override public io.givops.adapters.ConnectionTarget connectionTarget() { return gate.connectionTarget(); }
                 @Override public Duration remaining() { return gate.remaining(); }
             };
             credentials.requireSource(request.source(), captured); credentials.requireCurrent(captured, false);
