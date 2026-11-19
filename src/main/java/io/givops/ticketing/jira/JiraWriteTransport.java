@@ -1,5 +1,8 @@
 package io.givops.ticketing.jira;
 
+import io.givops.adapters.ConnectionClients;
+import io.givops.adapters.ConnectionFailure;
+
 import io.givops.ticketing.port.TicketRequestGate;
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
@@ -18,36 +21,46 @@ import java.util.concurrent.TimeoutException;
 
 /** One network attempt only. A write whose delivery is uncertain must never be replayed. */
 final class JiraWriteTransport implements AutoCloseable {
-    record Response(int status, byte[] body) { }
+    record Response(int status, byte[] body, String evidence) {
+        Response(int status, byte[] body) { this(status, body, ConnectionFailure.httpEvidence(status, null)); }
+    }
     static final class Failure extends RuntimeException {
         private final String code;
         private final boolean uncertain;
-        Failure(String code, boolean uncertain) { super(JiraMessages.format("ticketing.jiraWriteTransport.the.jira.write.could.not.be.confirmed")); this.code = code; this.uncertain = uncertain; }
+        Failure(String code, boolean uncertain) { this(code, uncertain, JiraMessages.format("ticketing.jiraWriteTransport.the.jira.write.could.not.be.confirmed")); }
+        Failure(String code, boolean uncertain, String evidence) { super(evidence); this.code = code; this.uncertain = uncertain; }
         String code() { return code; }
         boolean uncertain() { return uncertain; }
     }
     private final HttpClient client;
+    private final ConnectionClients clients;
     private final long limit;
-    JiraWriteTransport(HttpClient client, long limit) { this.client = client; this.limit = limit; }
+    JiraWriteTransport(HttpClient client, long limit) { this(client, limit, ConnectionClients.SYSTEM); }
+    JiraWriteTransport(HttpClient client, long limit, ConnectionClients clients) { this.client = client; this.limit = limit; this.clients = clients; }
 
     Response post(URI endpoint, String authorization, byte[] body, TicketRequestGate gate) {
         Duration timeout = gate.beforeRequest();
         var request = HttpRequest.newBuilder(endpoint).timeout(timeout).header("Accept", "application/json")
                 .header("Accept-Encoding", "identity").header("Authorization", authorization)
                 .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofByteArray(body)).build();
-        var pending = client.sendAsync(request, info -> new Body(limit, info.statusCode(), gate));
+        var pending = clients.select(gate.connectionTarget(), request.uri(), client).sendAsync(request, info -> new Body(limit, info.statusCode(), gate));
         try {
             var response = pending.get(timeout.toNanos(), TimeUnit.NANOSECONDS);
-            return new Response(response.statusCode(), response.body());
+            String mediaType = response.headers().firstValue("Content-Type").orElse("").split(";", 2)[0].strip();
+            String evidence = ConnectionFailure.httpEvidence(response.statusCode(), mediaType);
+            if (response.statusCode() == 201 && (mediaType.equalsIgnoreCase("text/html") || mediaType.equalsIgnoreCase("application/xhtml+xml"))) {
+                throw new Failure("release_jira_outcome_unknown", true, evidence);
+            }
+            return new Response(response.statusCode(), response.body(), evidence);
         } catch (InterruptedException e) {
             pending.cancel(true);
             Thread.currentThread().interrupt();
-            throw new Failure("release_jira_interrupted", true);
+            throw new Failure("release_jira_interrupted", true, ConnectionFailure.evidence(e));
         } catch (TimeoutException e) {
             pending.cancel(true);
-            throw new Failure("release_jira_timeout", true);
+            throw new Failure("release_jira_timeout", true, ConnectionFailure.evidence(e));
         } catch (ExecutionException e) {
-            throw new Failure("release_jira_outcome_unknown", true);
+            throw new Failure("release_jira_outcome_unknown", true, ConnectionFailure.evidence(e.getCause()));
         }
     }
     @Override public void close() { client.close(); }

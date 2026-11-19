@@ -1,5 +1,6 @@
 package io.givops.ticketing.jira;
 
+import io.givops.adapters.ConnectionClients;
 import io.givops.ticketing.model.TicketException;
 import io.givops.ticketing.model.TicketException.Code;
 import io.givops.ticketing.port.TicketRequestGate;
@@ -27,14 +28,22 @@ import java.util.concurrent.TimeoutException;
 
 final class JiraTransport implements AutoCloseable {
     private final HttpClient client;
+    private final ConnectionClients clients;
     private final long maxResponseBytes;
     private final Clock clock;
 
     JiraTransport(HttpClient client, long maxResponseBytes, Clock clock) {
+        this(client, maxResponseBytes, clock, ConnectionClients.SYSTEM);
+    }
+
+    JiraTransport(HttpClient client, long maxResponseBytes, Clock clock, ConnectionClients clients) {
+        this.clients = clients;
         this.client = client;
         this.maxResponseBytes = maxResponseBytes;
         this.clock = clock;
     }
+
+    ConnectionClients connectionClients() { return clients; }
 
     static HttpClient.Builder clientBuilder(Duration connectTimeout) {
         return HttpClient.newBuilder().connectTimeout(connectTimeout).followRedirects(HttpClient.Redirect.NEVER);
@@ -78,7 +87,7 @@ final class JiraTransport implements AutoCloseable {
             }
         }
         if (response.statusCode() != 200) {
-            throw remoteFailure(response.statusCode(), retryAt);
+            throw remoteFailure(response.statusCode(), retryAt, response.headers().firstValue("Content-Type").orElse(null));
         }
         return response.body();
     }
@@ -86,7 +95,8 @@ final class JiraTransport implements AutoCloseable {
     private HttpResponse<byte[]> exchange(HttpRequest.Builder request, TicketRequestGate gate, long responseLimit) {
         Duration timeout = gate.beforeRequest();
         long started = System.nanoTime();
-        var pending = client.sendAsync(request.timeout(timeout).build(),
+        var built = request.timeout(timeout).build();
+        var pending = clients.select(gate.connectionTarget(), built.uri(), client).sendAsync(built,
                 info -> new LimitedBody(gate, responseLimit, info.statusCode()));
         try {
             // Enforce the deadline through body completion as well as receipt of headers.
@@ -96,6 +106,7 @@ final class JiraTransport implements AutoCloseable {
             if (System.nanoTime() - started >= timeout.toNanos()) {
                 throw timeout();
             }
+            rejectHtml(response);
             return response;
         } catch (TimeoutException exception) {
             pending.cancel(true);
@@ -116,7 +127,7 @@ final class JiraTransport implements AutoCloseable {
             if (cause instanceof HttpTimeoutException) {
                 throw timeout();
             }
-            throw new TicketException(Code.PROVIDER_ERROR, JiraMessages.format("ticketing.jiraTransport.the.jira.cloud.request.could.not.be.completed"));
+            throw new TicketException(Code.PROVIDER_ERROR, JiraMessages.format("ticketing.jiraTransport.the.jira.cloud.request.could.not.be.completed")).withTransportFailure(cause);
         }
     }
 
@@ -148,7 +159,11 @@ final class JiraTransport implements AutoCloseable {
     }
 
     private static TicketException remoteFailure(int status, Instant retryAt) {
-        return switch (status) {
+        return remoteFailure(status, retryAt, null);
+    }
+
+    private static TicketException remoteFailure(int status, Instant retryAt, String contentType) {
+        TicketException result = switch (status) {
             case 401 -> new TicketException(Code.AUTHENTICATION_FAILED, JiraMessages.format("ticketing.jiraTransport.jira.cloud.rejected.the.configured.credentials"));
             case 403, 404 -> new TicketException(Code.AUTHORIZATION_FAILED,
                     JiraMessages.format("ticketing.jiraTransport.jira.cloud.did.not.expose.the.requested.resource"));
@@ -158,10 +173,19 @@ final class JiraTransport implements AutoCloseable {
             default -> new TicketException(Code.PROVIDER_ERROR, status >= 300 && status < 400
                     ? JiraMessages.format("ticketing.jiraTransport.jira.cloud.returned.a.redirect") : JiraMessages.format("ticketing.jiraTransport.jira.cloud.rejected.the.api.request"));
         };
+        return result.withHttpResponse(status, contentType);
+    }
+
+    private static void rejectHtml(HttpResponse<byte[]> response) {
+        String type = response.headers().firstValue("Content-Type").orElse("").split(";", 2)[0].strip();
+        if (response.statusCode() >= 200 && response.statusCode() < 300
+                && (type.equalsIgnoreCase("text/html") || type.equalsIgnoreCase("application/xhtml+xml"))) {
+            throw JiraPayload.invalidResponse().withHttpResponse(response.statusCode(), type);
+        }
     }
 
     private static TicketException timeout() {
-        return new TicketException(Code.TIMEOUT, JiraMessages.format("ticketing.jiraTransport.the.jira.cloud.request.timed.out"));
+        return new TicketException(Code.TIMEOUT, JiraMessages.format("ticketing.jiraTransport.the.jira.cloud.request.timed.out")).withTransportFailure(new HttpTimeoutException(""));
     }
 
     private static TicketException interrupted() {

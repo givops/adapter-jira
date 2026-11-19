@@ -35,6 +35,45 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class JiraTransportTest {
+    @Test
+    void selectsTheRegisteredInstanceClientForReadsRetriesAndWrites() {
+        var target = io.givops.adapters.ConnectionTarget.ticketing(java.util.UUID.randomUUID());
+        var selected = new java.util.concurrent.atomic.AtomicInteger();
+        try (var trusted = JiraTransport.clientBuilder(CONNECT_TIMEOUT).sslContext(clientTls).build()) {
+            io.givops.adapters.ConnectionClients clients = (actual, destination, fallback) -> {
+                assertThat(destination.getHost()).isEqualTo("localhost");
+                if (target.equals(actual)) { selected.incrementAndGet(); return trusted; }
+                return fallback;
+            };
+            try (var transport = new JiraTransport(JiraTransport.clientBuilder(CONNECT_TIMEOUT).build(), 1024, CLOCK, clients);
+                 var writes = new JiraWriteTransport(JiraTransport.clientBuilder(CONNECT_TIMEOUT).build(), 1024, clients)) {
+                var gate = new Gate();
+                gate.target = target;
+                assertThat(read(transport, uri("localhost", "/ok"), gate)).isEqualTo("{}");
+                assertFailure(Code.PROVIDER_ERROR, () -> read(transport, uri("localhost", "/unavailable"), gate));
+                var response = writes.post(uri("localhost", "/created"), AUTHORIZATION, new byte[0], gate);
+                assertThat(response.status()).isEqualTo(201);
+                assertThat(selected).hasValue(4);
+                gate.target = io.givops.adapters.ConnectionTarget.ticketing(java.util.UUID.randomUUID());
+                assertFailure(Code.PROVIDER_ERROR, () -> read(transport, uri("localhost", "/ok"), gate));
+                assertThat(selected).hasValue(4);
+            }
+            assertThat(trusted.isTerminated()).isFalse();
+        }
+    }
+
+    @Test
+    void diagnosesHtmlApiRepliesWithoutReturningProviderSecrets() {
+        try (var transport = transport(1024)) {
+            assertThatExceptionOfType(TicketException.class)
+                    .isThrownBy(() -> read(transport, uri("localhost", "/html"), new Gate()))
+                    .satisfies(failure -> {
+                        assertThat(failure.code()).isEqualTo(Code.INVALID_RESPONSE);
+                        assertThat(failure.getMessage()).contains("HTTP 200", "HTML").doesNotContain(RESPONSE_SECRET);
+                        assertThat(failure.diagnosticEvidence()).contains("HTTP 200", "HTML");
+                    });
+        }
+    }
     private static final String AUTHORIZATION = "Basic Zml4dHVyZTpleGFtcGxl";
     private static final String RESPONSE_SECRET = "synthetic-error-body-secret";
     private static final Instant NOW = Instant.parse("2026-10-10T12:00:00Z");
@@ -180,6 +219,11 @@ class JiraTransportTest {
             }
             switch (exchange.getRequestURI().getPath()) {
                 case "/ok" -> send(exchange, 200, "{}");
+                case "/created" -> send(exchange, 201, "{}");
+                case "/html" -> {
+                    exchange.getResponseHeaders().set("Content-Type", "text/html; synthetic-secret=" + RESPONSE_SECRET);
+                    send(exchange, 200, "<html>" + RESPONSE_SECRET + "</html>");
+                }
                 case "/denied" -> send(exchange, 403, RESPONSE_SECRET);
                 case "/redirect" -> {
                     exchange.getResponseHeaders().set("Location", "/redirect-target");
@@ -270,6 +314,8 @@ class JiraTransportTest {
     }
 
     private static final class Gate implements TicketRequestGate {
+        private io.givops.adapters.ConnectionTarget target;
+        @Override public io.givops.adapters.ConnectionTarget connectionTarget() { return target; }
         private int attempts;
         private final AtomicLong bytes = new AtomicLong();
         private long maxTotalBytes = Long.MAX_VALUE;
